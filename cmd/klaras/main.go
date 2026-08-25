@@ -125,6 +125,7 @@ func cmdServe() error {
 	// container cannot write turns every cover into a placeholder with no
 	// other symptom, which is a miserable thing to debug from the outside.
 	cfg.LogPreflight(log)
+	cfg.CheckExternalURL(log)
 
 	// Signal-aware root context: Ctrl-C or SIGTERM cancels everything below.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

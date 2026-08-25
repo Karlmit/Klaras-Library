@@ -492,3 +492,53 @@ func TestHandlerAlwaysHasALimiter(t *testing.T) {
 		t.Errorf("got %d, want 401 from a bad token", res.StatusCode)
 	}
 }
+
+// TestStoreMergeIsBounded guards the size of a merged response.
+//
+// A device that has never synced through us sends no store token, so Kobo does
+// a full account sync and can hand back thousands of entitlements at once.
+// Appending them all produced a response far bigger than the device expects.
+func TestStoreMergeIsBounded(t *testing.T) {
+	const limit = 10
+
+	// More store items than the budget allows.
+	store := kobo.NewStoreResultForTest(make([]json.RawMessage, 500), "store-token-abc", false)
+
+	tok := kobo.NewSyncToken()
+	items := make([]any, 0, 3)
+	for i := 0; i < 3; i++ {
+		items = append(items, map[string]string{"local": "entity"})
+	}
+
+	h := http.Header{}
+	out, cont := kobo.ApplyStoreResultForTest(store, items, tok, h, limit)
+
+	if len(out) > limit {
+		t.Errorf("merged response holds %d entities, want at most %d", len(out), limit)
+	}
+	if !cont {
+		t.Error("truncating did not ask the device to come back for the rest")
+	}
+	// Holding items back must not advance the store's position, or the
+	// deferred entitlements are lost.
+	if tok.RawKoboStoreToken != "" {
+		t.Errorf("store position advanced past a truncated batch: %q", tok.RawKoboStoreToken)
+	}
+}
+
+// TestStoreMergeAdvancesWhenComplete is the other half of that contract.
+func TestStoreMergeAdvancesWhenComplete(t *testing.T) {
+	store := kobo.NewStoreResultForTest(make([]json.RawMessage, 2), "store-token-abc", false)
+	tok := kobo.NewSyncToken()
+
+	out, cont := kobo.ApplyStoreResultForTest(store, []any{}, tok, http.Header{}, 100)
+	if len(out) != 2 {
+		t.Errorf("delivered %d of 2 store entities", len(out))
+	}
+	if cont {
+		t.Error("asked for another round despite delivering everything")
+	}
+	if tok.RawKoboStoreToken != "store-token-abc" {
+		t.Errorf("store position not advanced after a complete batch: %q", tok.RawKoboStoreToken)
+	}
+}

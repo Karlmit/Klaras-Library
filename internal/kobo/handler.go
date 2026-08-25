@@ -295,7 +295,9 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 	if store := <-storeCh; store != nil {
 		storeItems = len(store.Items)
 		var storeCont bool
-		items, storeCont = store.apply(items, tok, w.Header())
+		// Budget the store the same page limit our own entities get, so one
+		// response can never exceed what the device is built to read.
+		items, storeCont = store.apply(items, tok, w.Header(), h.syncLimit*2)
 		contSync = contSync || storeCont
 	}
 

@@ -1,10 +1,14 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // PathCheck is the result of testing one configured directory.
@@ -69,6 +73,48 @@ func (c *Config) Preflight() []PathCheck {
 		ck.Writable = true
 	}
 	return checks
+}
+
+// CheckExternalURL verifies the address handed to Kobo devices.
+//
+// This deserves its own check because the consequence outlives the mistake.
+// /v1/initialization returns URLs built from KLARAS_EXTERNAL_URL and the device
+// WRITES THEM INTO ITS OWN CONFIG. Point it at a host that does not resolve and
+// the reader keeps the bad address after the server is fixed, so a typo here
+// quietly breaks a device until someone edits its configuration by hand.
+func (c *Config) CheckExternalURL(log *slog.Logger) bool {
+	if c.ExternalURL == "" {
+		log.Warn("KLARAS_EXTERNAL_URL is not set: Kobo sync cannot work, because the " +
+			"device needs absolute URLs it can resolve itself")
+		return false
+	}
+	u, err := url.Parse(c.ExternalURL)
+	if err != nil || u.Host == "" {
+		log.Error("KLARAS_EXTERNAL_URL is not a usable URL", "value", c.ExternalURL)
+		return false
+	}
+
+	host := u.Hostname()
+	if ip := net.ParseIP(host); ip == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := net.DefaultResolver.LookupHost(ctx, host); err != nil {
+			log.Error("KLARAS_EXTERNAL_URL does not resolve", "host", host, "err", err)
+			for _, line := range []string{
+				"Kobo devices are handed this address and SAVE IT to their own config,",
+				"so a wrong hostname keeps breaking the device after the server is fixed.",
+				"Set it to the public address the DEVICE can reach, then restart.",
+				"If a device has already stored the wrong one, it corrects itself on the",
+				"next successful sync -- or edit api_endpoint and image_host in",
+				".kobo/Kobo/Kobo eReader.conf on the device.",
+			} {
+				log.Error(line)
+			}
+			return false
+		}
+	}
+	log.Info("external URL looks reachable", "url", c.ExternalURL)
+	return true
 }
 
 // LogPreflight reports the checks, loudly when something is wrong.

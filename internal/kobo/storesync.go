@@ -90,17 +90,37 @@ func (h *Handler) syncWithStore(ctx context.Context, r *http.Request, tok *SyncT
 	}
 }
 
-// apply folds the store's contribution into the response.
-func (s *storeSyncResult) apply(items []any, tok *SyncToken, h http.Header) ([]any, bool) {
+// apply folds the store's contribution into the response, bounded by limit.
+//
+// The cap matters as much as it does for our own entities. On a device that has
+// never synced through us, raw_kobo_store_token is empty, so Kobo performs a
+// FULL sync of the account and can return thousands of entitlements at once.
+// Appending all of them produced a response far larger than the device expects
+// -- and one it may take longer to read than its own timeout allows.
+//
+// Anything held back is not lost: the store token is only advanced when the
+// whole batch was delivered, so the next request replays from the same point.
+func (s *storeSyncResult) apply(items []any, tok *SyncToken, h http.Header, limit int) ([]any, bool) {
 	if s == nil {
 		return items, false
 	}
-	for _, raw := range s.Items {
+
+	room := limit - len(items)
+	if room < 0 {
+		room = 0
+	}
+	deferred := false
+	send := s.Items
+	if len(send) > room {
+		send, deferred = send[:room], true
+	}
+	for _, raw := range send {
 		items = append(items, raw)
 	}
-	// Only advance the store's position when it actually answered, so a
-	// timeout costs nothing but a delay.
-	if s.StoreToken != "" {
+	// Advance the store's position only when it answered AND we forwarded
+	// everything it gave us. Advancing after a truncated batch would drop the
+	// entitlements we held back.
+	if s.StoreToken != "" && !deferred {
 		tok.RawKoboStoreToken = s.StoreToken
 	}
 	if s.RecentReads != "" {
@@ -109,5 +129,6 @@ func (s *storeSyncResult) apply(items []any, tok *SyncToken, h http.Header) ([]a
 	if s.SyncMode != "" {
 		h.Set("x-kobo-sync-mode", s.SyncMode)
 	}
-	return items, s.Continue
+	// Ask the device to come back if the store has more, or if we truncated.
+	return items, s.Continue || deferred
 }

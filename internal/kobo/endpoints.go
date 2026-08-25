@@ -327,6 +327,16 @@ func (h *Handler) servePlaceholder(w http.ResponseWriter, width int) {
 // Every URL here points back at us, which is what redirects the device away
 // from the Kobo store and at this library.
 func (h *Handler) handleInitialization(w http.ResponseWriter, r *http.Request) {
+	// The device saves whatever this returns into its own configuration, so
+	// sending a URL we know is unusable would break the reader persistently.
+	// Better to send nothing and let it keep what it already has.
+	if strings.TrimSpace(h.externalURL) == "" {
+		h.log.Warn("refusing to send image URLs: KLARAS_EXTERNAL_URL is not set, " +
+			"and the device would store whatever it is given")
+		writeJSON(w, http.StatusOK, map[string]any{"Resources": map[string]any{}})
+		return
+	}
+
 	base := strings.TrimRight(h.externalURL, "/") + "/kobo/" + tokenOf(r)
 	res := map[string]any{
 		"Resources": map[string]any{
