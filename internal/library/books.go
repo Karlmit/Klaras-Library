@@ -51,46 +51,57 @@ const (
 // total and the cursor can never skip or repeat a row.
 type sortSpec struct {
 	orderBy string
-	// keyset is a WHERE fragment using $CUR (the sort key) and $CURID.
+	// keyset is a WHERE fragment. The placeholders are {{key}} and {{id}}
+	// rather than something like $CUR and $CURID: the latter prefix each
+	// other, so replacing $CUR first silently corrupts $CURID into "$13ID"
+	// and every page after the first becomes invalid SQL.
 	keyset string
-	// keyOf extracts the cursor key from a row.
+	// column is the sort key, read back to build the next cursor.
 	column string
 	desc   bool
+	// nullsLast marks a sort whose key can be NULL. Those rows collect at the
+	// end of the ordering, and a row comparison against them yields NULL
+	// rather than true, so without an explicit escape hatch the cursor can
+	// never cross from the non-NULL region into the tail.
+	nullsLast bool
 }
 
 var sortSpecs = map[SortMode]sortSpec{
 	SortTitle: {
 		orderBy: "b.title_sort, b.id",
-		keyset:  "(b.title_sort, b.id) > ($CUR, $CURID)",
+		keyset:  "(b.title_sort, b.id) > ({{key}}, {{id}})",
 		column:  "title_sort",
 	},
 	SortAuthor: {
 		orderBy: "b.author_sort, b.series_index NULLS FIRST, b.title_sort, b.id",
-		keyset:  "(b.author_sort, b.id) > ($CUR, $CURID)",
+		keyset:  "(b.author_sort, b.id) > ({{key}}, {{id}})",
 		column:  "author_sort",
 	},
 	SortAdded: {
 		orderBy: "b.added_at DESC, b.id DESC",
-		keyset:  "(b.added_at, b.id) < ($CUR::timestamptz, $CURID)",
+		keyset:  "(b.added_at, b.id) < ({{key}}::timestamptz, {{id}})",
 		column:  "added_at",
 		desc:    true,
 	},
 	SortPubDate: {
-		orderBy: "b.pubdate DESC NULLS LAST, b.id DESC",
-		keyset:  "(b.pubdate, b.id) < ($CUR::date, $CURID)",
-		column:  "pubdate",
-		desc:    true,
+		orderBy:   "b.pubdate DESC NULLS LAST, b.id DESC",
+		keyset:    "(b.pubdate, b.id) < ({{key}}::date, {{id}})",
+		column:    "pubdate",
+		desc:      true,
+		nullsLast: true,
 	},
 	SortRating: {
-		orderBy: "b.rating DESC NULLS LAST, b.id DESC",
-		keyset:  "(b.rating, b.id) < ($CUR::smallint, $CURID)",
-		column:  "rating",
-		desc:    true,
+		orderBy:   "b.rating DESC NULLS LAST, b.id DESC",
+		keyset:    "(b.rating, b.id) < ({{key}}::smallint, {{id}})",
+		column:    "rating",
+		desc:      true,
+		nullsLast: true,
 	},
 	SortSeries: {
-		orderBy: "b.series_name NULLS LAST, b.series_index NULLS FIRST, b.id",
-		keyset:  "(b.series_name, b.id) > ($CUR, $CURID)",
-		column:  "series_name",
+		orderBy:   "b.series_name NULLS LAST, b.series_index NULLS FIRST, b.id",
+		keyset:    "(b.series_name, b.id) > ({{key}}, {{id}})",
+		column:    "series_name",
+		nullsLast: true,
 	},
 }
 
@@ -199,6 +210,15 @@ func (s *Store) ListBooks(ctx context.Context, f Filter) (*BookPage, error) {
 		where = append(where, "b.needs_review")
 	}
 
+	// Everything added so far describes the filter. The cursor conditions come
+	// next and must NOT be part of the total, or "28,038 books" would shrink to
+	// "books after this page" as the user scrolls.
+	filterClause := ""
+	if len(where) > 0 {
+		filterClause = "WHERE " + strings.Join(where, " AND ")
+	}
+	filterArgs := len(args)
+
 	cur, err := decodeCursor(f.Cursor)
 	if err != nil {
 		return nil, err
@@ -213,11 +233,12 @@ func (s *Store) ListBooks(ctx context.Context, f Filter) (*BookPage, error) {
 			where = append(where, fmt.Sprintf("b.%s IS NULL AND b.id %s %s",
 				spec.column, gt(spec.desc), push(cur.ID)))
 		} else {
-			ks := strings.ReplaceAll(spec.keyset, "$CUR", push(cur.Key))
-			ks = strings.ReplaceAll(ks, "$CURID", push(cur.ID))
-			if spec.desc {
-				// DESC ... NULLS LAST: rows with a NULL key sort after every
-				// non-NULL one, so they must still be reachable.
+			ks := strings.ReplaceAll(spec.keyset, "{{key}}", push(cur.Key))
+			ks = strings.ReplaceAll(ks, "{{id}}", push(cur.ID))
+			if spec.nullsLast {
+				// NULLS LAST in either direction: those rows sort after every
+				// non-NULL one, and a row comparison against NULL is never
+				// true, so they need an explicit way in.
 				ks = "(" + ks + " OR b." + spec.column + " IS NULL)"
 			}
 			where = append(where, ks)
@@ -280,7 +301,7 @@ func (s *Store) ListBooks(ctx context.Context, f Filter) (*BookPage, error) {
 	}
 
 	if f.WithTotal {
-		total, err := s.countBooks(ctx, clause, args[:len(args)-1])
+		total, err := s.countBooks(ctx, filterClause, args[:filterArgs])
 		if err != nil {
 			return nil, err
 		}

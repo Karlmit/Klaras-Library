@@ -121,6 +121,11 @@ func cmdServe() error {
 	log := newLogger(cfg)
 	log.Info("starting klaras", "version", version, "library_root", cfg.LibraryRoot)
 
+	// Check the directories before anything depends on them. A cache the
+	// container cannot write turns every cover into a placeholder with no
+	// other symptom, which is a miserable thing to debug from the outside.
+	cfg.LogPreflight(log)
+
 	// Signal-aware root context: Ctrl-C or SIGTERM cancels everything below.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -783,6 +788,16 @@ func cmdDoctor() error {
 	}
 	fmt.Println("Klaras Library health check")
 	fmt.Println("---------------------------")
+	for _, ck := range cfg.Preflight() {
+		state := "ok"
+		switch {
+		case ck.Err != nil:
+			state = "UNUSABLE: " + ck.Err.Error()
+		case !ck.Writable:
+			state = "read-only"
+		}
+		fmt.Printf("  %-32s %s (%s)\n", ck.Name+" directory", state, ck.Path)
+	}
 	for _, c := range checks {
 		var n int64
 		if err := db.Pool.QueryRow(ctx, c.q).Scan(&n); err != nil {

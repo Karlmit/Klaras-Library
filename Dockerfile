@@ -63,7 +63,10 @@ COPY --from=build /out/klaras /usr/local/bin/klaras
 
 # The library is bind-mounted; these exist so a first run without mounts still
 # starts rather than failing on a missing path.
-RUN mkdir -p /library /ingest /cache && chown -R klaras:klaras /library /ingest /cache
+# These are mount points, and normally the host directory's ownership wins.
+# They are made world-writable so the container still works if a mount is
+# forgotten -- whatever uid the compose 'user:' setting picks.
+RUN mkdir -p /library /ingest /cache && chmod 0777 /library /ingest /cache
 USER klaras
 
 ENV KLARAS_LISTEN_ADDR=:8083 \
