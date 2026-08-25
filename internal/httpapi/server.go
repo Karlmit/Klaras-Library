@@ -36,6 +36,7 @@ type Server struct {
 	kepub     *kepub.Service
 	files     *filestore.Store
 	providers *provider.Set
+	limiter   *auth.Limiter
 	queue     *jobs.Queue
 	sessions  *scs.SessionManager
 	log       *slog.Logger
@@ -75,6 +76,11 @@ func New(d Deps) *Server {
 		len(d.Config.ExternalURL) >= 5 && d.Config.ExternalURL[:5] == "https"
 
 	s := &Server{
+		// 8 failures in 15 minutes, then locked out for 15. Loose enough that
+		// mistyping a passphrase never bites, tight enough that online guessing
+		// against an argon2id hash is hopeless.
+		limiter: auth.NewLimiter(8, 15*time.Minute, 15*time.Minute),
+
 		cfg: d.Config, db: d.DB, lib: d.Library, auth: d.Auth,
 		covers: d.Covers, kepub: d.Kepub, files: d.Files,
 		providers: d.Providers, queue: d.Queue, sessions: sm,
@@ -83,6 +89,9 @@ func New(d Deps) *Server {
 	s.routes()
 	return s
 }
+
+// Limiter exposes the auth failure limiter so the caller can run its sweeper.
+func (s *Server) Limiter() *auth.Limiter { return s.limiter }
 
 // Sessions exposes the session manager so the caller can run its cleanup.
 func (s *Server) Sessions() *scs.SessionManager { return s.sessions }
@@ -105,13 +114,13 @@ func (s *Server) routes() {
 	// authenticates with a token in the URL path and has no cookie jar.
 	kobo.NewHandler(kobo.Deps{
 		Pool: s.db.Pool, Auth: s.auth, Kepub: s.kepub, Covers: s.covers,
-		Queue: s.queue, LibraryRoot: s.cfg.LibraryRoot,
+		Queue: s.queue, Limiter: s.limiter, LibraryRoot: s.cfg.LibraryRoot,
 		ExternalURL: s.cfg.ExternalURL, ProxyStore: s.cfg.KoboProxyStore,
 		SyncLimit: s.cfg.KoboSyncLimit, Log: s.log,
 	}).Routes(r)
 
 	// OPDS also sits outside the session: readers authenticate with HTTP Basic.
-	opds.New(s.lib, s.auth, s.cfg.ExternalURL).Routes(r)
+	opds.New(s.lib, s.auth, s.limiter, s.cfg.ExternalURL).Routes(r)
 
 	r.Group(func(r chi.Router) {
 		r.Use(s.sessions.LoadAndSave)

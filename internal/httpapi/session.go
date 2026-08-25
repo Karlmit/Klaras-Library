@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Karlmit/Klaras-Library/internal/auth"
 )
@@ -84,14 +86,29 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Rate limit before touching the database, so a guessing run costs the
+	// attacker a request and costs us nothing.
+	ip := auth.ClientIP(r)
+	userKey := "user:" + strings.ToLower(strings.TrimSpace(in.Username))
+	if ok, wait := s.limiter.Allowed("ip:"+ip, userKey); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		s.log.Warn("login rate limited", "ip", ip, "username", in.Username,
+			"retry_in", wait.Round(time.Second))
+		writeErr(w, http.StatusTooManyRequests,
+			"too many failed attempts, try again in "+wait.Round(time.Minute).String())
+		return
+	}
+
 	u, err := s.auth.Authenticate(r.Context(), in.Username, in.Password)
 	if err != nil {
-		s.log.Warn("failed login", "username", in.Username, "ip", r.RemoteAddr)
+		s.limiter.Fail("ip:"+ip, userKey)
+		s.log.Warn("failed login", "username", in.Username, "ip", ip)
 		// One message for both wrong-user and wrong-password, so the response
 		// does not confirm which usernames exist.
 		writeErr(w, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
+	s.limiter.Succeed("ip:"+ip, userKey)
 
 	// A new session id on login defeats session fixation.
 	if err := s.sessions.RenewToken(r.Context()); err != nil {
@@ -137,10 +154,18 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	// An imported user has no working password to prove, so the current-password
 	// check is skipped exactly once, for them.
 	if !u.PasswordResetRequired {
+		ip := auth.ClientIP(r)
+		if ok, wait := s.limiter.Allowed("pw:" + ip); !ok {
+			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+			writeErr(w, http.StatusTooManyRequests, "too many failed attempts")
+			return
+		}
 		if _, err := s.auth.Authenticate(r.Context(), u.Username, in.Current); err != nil {
+			s.limiter.Fail("pw:" + ip)
 			writeErr(w, http.StatusForbidden, "current password is incorrect")
 			return
 		}
+		s.limiter.Succeed("pw:" + ip)
 	}
 	if err := s.auth.SetPassword(r.Context(), u.ID, in.New); err != nil {
 		if err == auth.ErrPasswordTooShort {

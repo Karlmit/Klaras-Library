@@ -31,6 +31,7 @@ type Handler struct {
 	kepub       *kepub.Service
 	covers      *covers.Service
 	queue       *jobs.Queue
+	limiter     *auth.Limiter
 	libraryRoot string
 	externalURL string
 	proxyStore  bool
@@ -45,6 +46,7 @@ type Deps struct {
 	Kepub       *kepub.Service
 	Covers      *covers.Service
 	Queue       *jobs.Queue
+	Limiter     *auth.Limiter
 	LibraryRoot string
 	ExternalURL string
 	ProxyStore  bool
@@ -59,7 +61,7 @@ func NewHandler(d Deps) *Handler {
 	}
 	return &Handler{
 		pool: d.Pool, engine: NewEngine(d.Pool), auth: d.Auth,
-		kepub: d.Kepub, covers: d.Covers, queue: d.Queue,
+		kepub: d.Kepub, covers: d.Covers, queue: d.Queue, limiter: d.Limiter,
 		libraryRoot: d.LibraryRoot, externalURL: d.ExternalURL,
 		proxyStore: d.ProxyStore, syncLimit: d.SyncLimit, log: d.Log,
 	}
@@ -107,12 +109,22 @@ func (h *Handler) authenticate(next http.Handler) http.Handler {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		// Only failures are counted: a paired device polls constantly and
+		// legitimately, and must never be locked out for doing so.
+		ip := auth.ClientIP(r)
+		if ok, wait := h.limiter.Allowed("kobo:" + ip); !ok {
+			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
+			return
+		}
 		u, err := h.auth.UserForKoboToken(r.Context(), token)
 		if err != nil {
-			h.log.Warn("kobo auth failed", "ip", r.RemoteAddr, "path", r.URL.Path)
+			h.limiter.Fail("kobo:" + ip)
+			h.log.Warn("kobo auth failed", "ip", ip, "path", r.URL.Path)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		h.limiter.Succeed("kobo:" + ip)
 		ctx := context.WithValue(r.Context(), userKey, u)
 		ctx = context.WithValue(ctx, tokenKey, token)
 		next.ServeHTTP(w, r.WithContext(ctx))

@@ -254,15 +254,46 @@ store position is not advanced, so nothing is lost.
 
 ### Reverse proxy
 
-Two things bite people repeatedly with calibre-web and apply equally here:
+**No special configuration is needed.** A plain proxy to the container is
+enough; the defaults in Nginx Proxy Manager, Caddy or Traefik will do.
+
+One thing genuinely does matter:
 
 - **TLS 1.2 must be enabled.** Kobo firmware ships an old TLS client, and a
-  "modern compatibility" profile that permits only TLS 1.3 will fail.
-- **Forward `X-Forwarded-Proto: https`.** Without it the device is handed
-  `http://` download URLs, which fail silently.
+  "modern compatibility" profile that permits only TLS 1.3 will fail. This is
+  a setting on your proxy, not here.
 
-`KLARAS_EXTERNAL_URL` must be the URL the *device* can reach. The server refuses
-to start if it is not https.
+Notably **not** required, unlike calibre-web: forwarding `X-Forwarded-Proto`
+or `X-Scheme`. Download URLs are built from `KLARAS_EXTERNAL_URL` rather than
+guessed from the request, so the "Kobo gets http:// links and fails silently"
+problem cannot happen. `KLARAS_EXTERNAL_URL` must be the URL the *device* can
+reach, and the server refuses to start if it is not https.
+
+If you are removing an SSO layer such as authentik that used to sit in front of
+calibre-web, you can delete its whole custom configuration block, including the
+`location ^~ /kobo/ { auth_request off; ... }` carve-out that existed to let the
+device past the login screen. Just repoint the proxy's forward port at Klaras
+Library. Do read **Exposing it to the internet** below first.
+
+### Exposing it to the internet
+
+Klaras Library is designed to be reachable directly, because Kobo devices
+cannot pass through an SSO login. Three surfaces authenticate:
+
+| Surface | Credential |
+|---|---|
+| Web UI | session cookie, argon2id password |
+| `/opds` | HTTP Basic, same accounts |
+| `/kobo/{token}` | 128-bit token in the URL, per device |
+
+Repeated failures are locked out: eight in fifteen minutes trips a fifteen
+minute block, counted per client address **and** per username, so neither a
+single host hammering many accounts nor a distributed run against one account
+gets through. A successful login clears the counter, and a paired Kobo polling
+normally is never affected because only failures count.
+
+If you previously relied on an SSO proxy for protection, that is what replaces
+it. Use a long passphrase for every account.
 
 ## Swedish
 

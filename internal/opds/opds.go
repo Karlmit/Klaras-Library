@@ -30,12 +30,17 @@ const (
 type Handler struct {
 	lib         *library.Store
 	auth        *auth.Service
+	limiter     *auth.Limiter
 	externalURL string
 }
 
-// New builds an OPDS handler.
-func New(lib *library.Store, a *auth.Service, externalURL string) *Handler {
-	return &Handler{lib: lib, auth: a, externalURL: strings.TrimRight(externalURL, "/")}
+// New builds an OPDS handler. The limiter is shared with the web login, so
+// failures against either surface count towards the same lockout.
+func New(lib *library.Store, a *auth.Service, lim *auth.Limiter, externalURL string) *Handler {
+	return &Handler{
+		lib: lib, auth: a, limiter: lim,
+		externalURL: strings.TrimRight(externalURL, "/"),
+	}
 }
 
 // Routes mounts the catalogue.
@@ -68,11 +73,24 @@ func (h *Handler) basicAuth(next http.Handler) http.Handler {
 			h.challenge(w)
 			return
 		}
+
+		// Basic auth over a public endpoint is a guessing surface; throttle it
+		// on the same counters as the web login.
+		ip := auth.ClientIP(r)
+		keys := []string{"ip:" + ip, "user:" + strings.ToLower(strings.TrimSpace(user))}
+		if allowed, wait := h.limiter.Allowed(keys...); !allowed {
+			w.Header().Set("Retry-After", fmt.Sprint(int(wait.Seconds())+1))
+			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
+			return
+		}
+
 		u, err := h.auth.Authenticate(r.Context(), user, pass)
 		if err != nil {
+			h.limiter.Fail(keys...)
 			h.challenge(w)
 			return
 		}
+		h.limiter.Succeed(keys...)
 		if u.PasswordResetRequired {
 			http.Error(w, "set a password in the web interface first", http.StatusForbidden)
 			return

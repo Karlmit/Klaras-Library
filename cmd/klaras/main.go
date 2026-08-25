@@ -162,14 +162,16 @@ func cmdServe() error {
 		log.Warn("initial facet refresh failed", "err", err)
 	}
 
+	srvHandler := httpapi.New(httpapi.Deps{
+		Config: cfg, DB: db, Library: lib, Auth: authSvc,
+		Covers: coverSvc, Kepub: kepubSvc, Files: files,
+		Providers: provider.NewSet("swe"),
+		Queue:     queue, Log: log, Version: version,
+	})
+
 	srv := &http.Server{
-		Addr: cfg.ListenAddr,
-		Handler: httpapi.New(httpapi.Deps{
-			Config: cfg, DB: db, Library: lib, Auth: authSvc,
-			Covers: coverSvc, Kepub: kepubSvc, Files: files,
-			Providers: provider.NewSet("swe"),
-			Queue:     queue, Log: log, Version: version,
-		}),
+		Addr:              cfg.ListenAddr,
+		Handler:           srvHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       90 * time.Second,
 		// No WriteTimeout: book downloads and KEPUB streams can legitimately
@@ -190,6 +192,12 @@ func cmdServe() error {
 			Run(ctx, 60*time.Second)
 	}
 	go lib.RunFacetRefresher(ctx, 30*time.Second, log)
+
+	// Prune expired lockout entries, so a long guessing run against random
+	// usernames cannot grow the limiter's map without bound.
+	stopSweeper := make(chan struct{})
+	defer close(stopSweeper)
+	go srvHandler.Limiter().RunSweeper(stopSweeper, 5*time.Minute)
 
 	errCh := make(chan error, 1)
 	go func() {
