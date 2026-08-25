@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -130,7 +131,9 @@ func newFixtureOpts(t *testing.T, shelfBooks int, proxyStore bool) *fixture {
 		Covers:      covers.New(libRoot, cacheDir),
 		Queue:       jobs.New(db.Pool, log),
 		LibraryRoot: libRoot, ExternalURL: "https://library.example.com",
-		SyncLimit: 10, ProxyStore: proxyStore, Log: log,
+		SyncLimit: 10, ProxyStore: proxyStore,
+		Limiter: auth.NewLimiter(8, time.Minute, time.Minute),
+		Log:     log,
 	}).Routes(r)
 
 	f.srv = httptest.NewServer(r)
@@ -454,5 +457,38 @@ func TestStoreProxyFailureDoesNotBreakLocalSync(t *testing.T) {
 	if len(items) != 0 {
 		t.Errorf("second sync returned %d entities; the store failure broke convergence",
 			len(items))
+	}
+}
+
+// TestHandlerAlwaysHasALimiter guards a footgun.
+//
+// An omitted limiter used to panic on the first request. Panicking on a missing
+// security control is bad, but silently running without one is worse, so the
+// constructor supplies a default.
+func TestHandlerAlwaysHasALimiter(t *testing.T) {
+	dsn := testdb.For(t, os.Getenv("KLARAS_TEST_DATABASE_URL"), "kobo")
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	db, err := store.Open(context.Background(), dsn, 2, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(db.Close)
+
+	r := chi.NewRouter()
+	// Deliberately no Limiter.
+	kobo.NewHandler(kobo.Deps{
+		Pool: db.Pool, Auth: auth.NewService(db.Pool), Log: log,
+	}).Routes(r)
+
+	srv := httptest.NewServer(r)
+	t.Cleanup(srv.Close)
+
+	res, err := http.Get(srv.URL + "/kobo/nope/v1/library/sync")
+	if err != nil {
+		t.Fatalf("request failed, which means the handler panicked: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("got %d, want 401 from a bad token", res.StatusCode)
 	}
 }

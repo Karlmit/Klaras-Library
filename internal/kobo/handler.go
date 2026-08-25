@@ -59,6 +59,12 @@ func NewHandler(d Deps) *Handler {
 	if d.SyncLimit <= 0 {
 		d.SyncLimit = SyncItemLimit
 	}
+	// Default rather than tolerate nil. A missing limiter is a missing security
+	// control, and silently allowing unlimited token guessing is far worse than
+	// the alternative of always having one.
+	if d.Limiter == nil {
+		d.Limiter = auth.NewLimiter(8, 15*time.Minute, 15*time.Minute)
+	}
 	return &Handler{
 		pool: d.Pool, engine: NewEngine(d.Pool), auth: d.Auth,
 		kepub: d.Kepub, covers: d.Covers, queue: d.Queue, limiter: d.Limiter,

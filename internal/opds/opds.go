@@ -37,6 +37,11 @@ type Handler struct {
 // New builds an OPDS handler. The limiter is shared with the web login, so
 // failures against either surface count towards the same lockout.
 func New(lib *library.Store, a *auth.Service, lim *auth.Limiter, externalURL string) *Handler {
+	// Default rather than tolerate nil: OPDS is HTTP Basic on a public path,
+	// so running it without a limiter is not a state worth supporting.
+	if lim == nil {
+		lim = auth.NewLimiter(8, 15*time.Minute, 15*time.Minute)
+	}
 	return &Handler{
 		lib: lib, auth: a, limiter: lim,
 		externalURL: strings.TrimRight(externalURL, "/"),
