@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/Karlmit/Klaras-Library/internal/auth"
 	"github.com/Karlmit/Klaras-Library/internal/calibre"
 	"github.com/Karlmit/Klaras-Library/internal/config"
@@ -65,6 +67,10 @@ func run() error {
 		return cmdRevertMoves()
 	case "doctor":
 		return cmdDoctor()
+	case "users":
+		return cmdUsers()
+	case "passwd":
+		return cmdPasswd()
 	case "version":
 		fmt.Println("klaras", version)
 		return nil
@@ -93,6 +99,8 @@ Usage:
                           DESTRUCTIVE: always review --dry-run output first.
   klaras revert-moves --since TIME [--dry-run]
                           Undo file moves made since TIME, using the journal
+  klaras users            List accounts
+  klaras passwd USERNAME  Set an account's password
   klaras doctor           Check the library for problems (read-only)
   klaras dev-seed --books N
                           Replace the library with N synthetic books, for
@@ -580,6 +588,158 @@ func cmdRevertMoves() error {
 	fmt.Fprintf(os.Stderr, "  skipped (already back, or occupied) %d\n", rep.Skipped)
 	fmt.Fprintf(os.Stderr, "  failed                              %d\n", rep.Failed)
 	return nil
+}
+
+func cmdUsers() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg)
+	ctx := context.Background()
+
+	db, err := store.Open(ctx, cfg.DatabaseURL, cfg.DBMaxConns, log)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	rows, err := db.Pool.Query(ctx, `
+		SELECT u.id, u.username, COALESCE(u.email,''), u.role, u.is_active,
+		       u.password_reset_required,
+		       (SELECT count(*) FROM shelves s WHERE s.user_id = u.id),
+		       (SELECT count(*) FROM shelves s WHERE s.user_id = u.id AND s.kobo_sync),
+		       (SELECT count(*) FROM kobo_auth_tokens k WHERE k.user_id = u.id)
+		FROM users u ORDER BY u.id`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	fmt.Printf("%-4s %-18s %-26s %-8s %-8s %-7s %-6s %s\n",
+		"ID", "USERNAME", "EMAIL", "ROLE", "ACTIVE", "SHELVES", "KOBO", "PASSWORD")
+	needsPassword := 0
+	for rows.Next() {
+		var (
+			id, shelves, koboShelves, tokens int64
+			username, email, role            string
+			active, mustReset                bool
+		)
+		if err := rows.Scan(&id, &username, &email, &role, &active, &mustReset,
+			&shelves, &koboShelves, &tokens); err != nil {
+			return err
+		}
+		pw := "set"
+		if mustReset {
+			pw = "NOT SET -- cannot log in"
+			needsPassword++
+		}
+		kobo := fmt.Sprintf("%d/%d", koboShelves, tokens)
+		fmt.Printf("%-4d %-18s %-26s %-8s %-8v %-7d %-6s %s\n",
+			id, username, email, role, active, shelves, kobo, pw)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "\nKOBO column is synced-shelves/tokens.\n")
+	if needsPassword > 0 {
+		fmt.Fprintf(os.Stderr, "\n%d account(s) came from calibre-web and have no usable password.\n"+
+			"calibre-web hashes cannot be converted, so set one for each:\n"+
+			"    klaras passwd USERNAME\n", needsPassword)
+	}
+	return nil
+}
+
+func cmdPasswd() error {
+	fs := flag.NewFlagSet("passwd", flag.ExitOnError)
+	password := fs.String("password", "", "the new password; omit to be prompted")
+	role := fs.String("role", "", "also set the role (admin, editor or reader)")
+
+	// Go's flag package stops parsing at the first positional argument, so
+	// `passwd USERNAME --password X` would silently ignore the flags. That is
+	// the order anyone would type, so pull the username out first.
+	username, rest := splitPositional(os.Args[2:])
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	if username == "" || fs.NArg() > 0 {
+		return fmt.Errorf("usage: klaras passwd USERNAME [--password PW] [--role ROLE]")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg)
+	ctx := context.Background()
+
+	db, err := store.Open(ctx, cfg.DatabaseURL, cfg.DBMaxConns, log)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	var id int64
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT id FROM users WHERE lower(username)=lower($1)`, username).Scan(&id); err != nil {
+		return fmt.Errorf("no account called %q (try: klaras users)", username)
+	}
+
+	pw := *password
+	if pw == "" {
+		// Read from the terminal without echoing.
+		fmt.Fprintf(os.Stderr, "New password for %s: ", username)
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return fmt.Errorf("could not read the password: %w "+
+				"(no terminal? use --password)", err)
+		}
+		pw = string(b)
+	}
+
+	svc := auth.NewService(db.Pool)
+	if err := svc.SetPassword(ctx, id, pw); err != nil {
+		return err
+	}
+	if *role != "" {
+		switch *role {
+		case auth.RoleAdmin, auth.RoleEditor, auth.RoleReader:
+		default:
+			return fmt.Errorf("unknown role %q", *role)
+		}
+		if _, err := db.Pool.Exec(ctx,
+			`UPDATE users SET role=$2, updated_at=now() WHERE id=$1`, id, *role); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(os.Stderr, "Password set for %s. They can sign in now.\n", username)
+	return nil
+}
+
+// splitPositional returns the first non-flag argument and everything else, so
+// flags may appear on either side of it.
+func splitPositional(args []string) (positional string, rest []string) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if strings.HasPrefix(a, "-") {
+			rest = append(rest, a)
+			// A flag written as "--password X" consumes the next argument;
+			// "--password=X" does not.
+			if !strings.Contains(a, "=") && i+1 < len(args) &&
+				!strings.HasPrefix(args[i+1], "-") {
+				i++
+				rest = append(rest, args[i])
+			}
+			continue
+		}
+		if positional == "" {
+			positional = a
+			continue
+		}
+		rest = append(rest, a)
+	}
+	return positional, rest
 }
 
 func cmdDoctor() error {

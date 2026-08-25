@@ -162,6 +162,14 @@ func (s *Server) routes() {
 				r.Post("/books/bulk", s.handleBulkUpdate)
 				r.Get("/metadata/search", s.handleMetadataSearch)
 			})
+
+			// Account administration.
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireRole(auth.RoleAdmin))
+				r.Get("/users", s.handleListUsers)
+				r.Patch("/users/{id}", s.handleUpdateUser)
+				r.Put("/users/{id}/password", s.handleSetUserPassword)
+			})
 		})
 	})
 

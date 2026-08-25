@@ -24,6 +24,10 @@ services:
       - /mnt/user/books/library:/library
       # Drop ebook files here and they are imported automatically.
       - /mnt/user/books/ingest:/ingest
+      # calibre-web's own state, read-only, for the one-time import. It holds
+      # your shelves, their Kobo sync flags, users and sync tokens -- none of
+      # which live in Calibre's metadata.db. Remove this line once imported.
+      - /mnt/user/appdata/calibre-web:/calibre-web:ro
       # Cover thumbnails and converted KEPUBs. About 170 kB per book, so ~5 GB
       # for 28,000 books. Safe to delete; it regenerates.
       - /mnt/user/appdata/klaras-library/cache:/cache

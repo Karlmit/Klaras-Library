@@ -85,6 +85,10 @@ services:
       - /mnt/user/books/library:/library
       # Drop ebook files here and they are imported automatically.
       - /mnt/user/books/ingest:/ingest
+      # calibre-web's own state, read-only, for the one-time import. It holds
+      # your shelves, their Kobo sync flags, users and sync tokens -- none of
+      # which live in Calibre's metadata.db. Remove this line once imported.
+      - /mnt/user/appdata/calibre-web:/calibre-web:ro
       # Cover thumbnails and converted KEPUBs. About 170 kB per book, so ~5 GB
       # for 28,000 books. Safe to delete; it regenerates.
       - /mnt/user/appdata/klaras-library/cache:/cache
@@ -155,11 +159,15 @@ calibre-web is unaffected. `--dry-run` performs the whole import in a
 transaction and rolls it back, reporting exactly what a real run would do.
 
 ```bash
-docker compose exec klaras klaras import \
+docker compose exec klaras-library klaras import \
   --calibre-library /library \
   --calibre-web-db /calibre-web/app.db \
   --dry-run
 ```
+
+Drop `--dry-run` when the numbers look right. `--calibre-web-db` needs the
+calibre-web appdata mount shown in the compose above; without it you still get
+the whole library, but no shelves, users or Kobo tokens.
 
 What comes across:
 
@@ -169,8 +177,21 @@ What comes across:
 - From calibre-web's `app.db`: users, shelves, their Kobo sync flags, sync
   tokens and reading state
 
-Passwords cannot come across — calibre-web uses werkzeug scrypt, this uses
-argon2id — so imported users set a new password on first login.
+### Imported users need a password
+
+calibre-web stores werkzeug scrypt hashes and this uses argon2id, so passwords
+cannot come across. Imported accounts arrive unusable on purpose, and an
+administrator sets a password for each:
+
+```bash
+docker compose exec klaras-library klaras users
+docker compose exec -it klaras-library klaras passwd klarasvensson
+```
+
+`users` lists every account, which shelves and Kobo tokens they own, and
+whether they can log in yet. `passwd` prompts without echoing; pass
+`--password` instead if you are scripting it. The same thing is available to
+admins in the web UI.
 
 Suspect data is imported faithfully and **flagged**, never silently corrected.
 On the library this was built against that surfaced 1,115 books with a merged
