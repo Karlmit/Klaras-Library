@@ -1,0 +1,14 @@
+.git
+.github
+.dev
+.planning
+.opus
+.claude
+bin
+data
+ingest
+web/node_modules
+web/dist
+*.md
+!README.md
+.env

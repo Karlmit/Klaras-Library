@@ -3,3 +3,15 @@
 .claude/
 .opus/
 .agents/
+
+# --- build artifacts ---
+/bin/
+/.dev/
+/data/
+/ingest/
+web/dist/
+web/node_modules/
+node_modules/
+*.test
+.env
+.playwright-mcp/

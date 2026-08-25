@@ -1,0 +1,76 @@
+/* Klaras Library design tokens.
+ *
+ * The violet ramp is derived from the logo, not chosen independently: sampling
+ * web/src/assets/brand/logo.png gives a hue locked at 267-280 (clustered on
+ * 270) at 37-50% saturation. --v-50/-400/-500 are the logo's own pixels;
+ * --v-600 and darker continue that ramp past where the logo stops, because the
+ * darkest colour in the logo (#966CC0) is only 4.00:1 on white and so cannot
+ * carry text or button fills.
+ *
+ * Contrast ratios in the comments are against --surface (#FFFFFF).
+ * Light theme only for v1; dark mode is a second block here, not a rewrite.
+ */
+
+:root {
+    /* ---- violet ramp (from the logo) ---- */
+    --v-50:  #F6EFFD;  /* 1.12:1  logo badge background           */
+    --v-100: #E9DCF7;  /* 1.31:1  selected row, badge, nav pill    */
+    --v-200: #DAC5EF;  /* 1.59:1  borders on tinted surfaces       */
+    --v-300: #C8ADE4;  /* 1.99:1  decorative, cover placeholder    */
+    --v-400: #B89DD2;  /* 2.39:1  logo mid-tone, progress track    */
+    --v-500: #966DC0;  /* 4.00:1  logo darkest; large text only    */
+    --v-600: #7A49AB;  /* 6.23:1  ACCENT: buttons, links, nav      */
+    --v-700: #663D8F;  /* 7.99:1  hover / focus                    */
+    --v-800: #4C2C6D;  /* 11.12:1 pressed                          */
+    --v-900: #381F51;  /* 14.16:1 headings on tint                 */
+
+    /* ---- semantic ---- */
+    --accent:        var(--v-600);
+    --accent-hover:  var(--v-700);
+    --accent-active: var(--v-800);
+    --accent-subtle: var(--v-100);
+    --accent-faint:  var(--v-50);
+
+    /* ---- neutrals ----
+     * --text-muted is #71717A rather than calibre-web's #999: at 2.8:1 that
+     * value makes the author name under every cover genuinely hard to read.
+     */
+    --text:           #1F1F23;  /* 16.6:1 */
+    --text-muted:     #71717A;  /*  4.9:1 */
+    --text-invert:    #FFFFFF;
+    --border:         #E4E4E7;
+    --border-strong:  #D4D4D8;
+    --surface:        #FFFFFF;
+    --surface-sunken: #FAFAFC;
+    --shell:          #F8F6FB;  /* app chrome, tinted toward the logo */
+
+    /* ---- status ---- */
+    --danger:  #DC2626;  /* 4.8:1 */
+    --warning: #B45309;  /* 4.7:1 */
+    --success: #15803D;  /* 4.8:1 */
+
+    /* ---- shape ---- */
+    --radius-sm: 6px;   /* buttons, inputs */
+    --radius-md: 8px;   /* cards           */
+    --radius-lg: 12px;  /* modals, panels  */
+
+    --shadow-cover: 0 2px 8px -2px rgb(0 0 0 / 0.12);
+    --shadow-panel: 0 4px 16px -4px rgb(0 0 0 / 0.14);
+
+    /* ---- layout ---- */
+    --sidebar-width: 220px;
+    --topbar-height: 56px;
+    --grid-min-col:  170px;   /* repeat(auto-fill, minmax(...)) */
+    --cover-ratio:   2 / 3;
+
+    /* ---- type ---- */
+    --font-ui:      'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+    --font-mono:    ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* Bootstrap 3 suppressed focus rings; every interactive element gets one here. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}

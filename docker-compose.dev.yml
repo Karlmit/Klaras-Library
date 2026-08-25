@@ -1,0 +1,40 @@
+# Development: Postgres only. The app runs on the host via `make run`.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: klaras
+      POSTGRES_PASSWORD: klaras
+      POSTGRES_DB: klaras
+      POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=sv-SE --encoding=UTF8"
+    ports:
+      - "55432:5432"
+    volumes:
+      - klaras-dev-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U klaras -d klaras"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Separate throwaway database for `go test ./...`; never shares state with dev.
+  postgres-test:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: klaras
+      POSTGRES_PASSWORD: klaras
+      POSTGRES_DB: klaras_test
+      POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=sv-SE --encoding=UTF8"
+    ports:
+      - "55433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U klaras -d klaras_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  klaras-dev-pgdata:

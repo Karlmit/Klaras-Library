@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: klaras
+          POSTGRES_PASSWORD: klaras
+          POSTGRES_DB: klaras_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U klaras -d klaras_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
+
+      - name: Verify formatting
+        run: |
+          out=$(gofmt -l . | grep -v '^web/' || true)
+          if [ -n "$out" ]; then echo "gofmt needed:"; echo "$out"; exit 1; fi
+
+      - name: Vet
+        run: go vet ./...
+
+      # Includes the query-plan regression tests, which fail the build if any
+      # critical query starts sequentially scanning the library.
+      - name: Test
+        env:
+          KLARAS_TEST_DATABASE_URL: postgres://klaras:klaras@127.0.0.1:5432/klaras_test?sslmode=disable
+        run: go test ./... -race -count=1
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

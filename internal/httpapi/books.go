@@ -1,0 +1,92 @@
+package httpapi
+
+import (
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/Karlmit/Klaras-Library/internal/library"
+)
+
+// handleListBooks serves the grid.
+func (s *Server) handleListBooks(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	f := library.Filter{
+		Query:       strings.TrimSpace(q.Get("q")),
+		Author:      q.Get("author"),
+		Tag:         q.Get("tag"),
+		Series:      q.Get("series"),
+		Language:    q.Get("language"),
+		Format:      q.Get("format"),
+		NeedsReview: queryBool(r, "needs_review"),
+		Sort:        library.SortMode(q.Get("sort")),
+		Limit:       queryInt(r, "limit", 60),
+		Cursor:      q.Get("cursor"),
+		WithTotal:   queryBool(r, "total"),
+	}
+	if sh := q.Get("shelf"); sh != "" {
+		if id, err := strconv.ParseInt(sh, 10, 64); err == nil {
+			f.ShelfID = id
+		}
+	}
+	// A text query defaults to relevance ordering; anything else keeps its
+	// stable keyset sort.
+	if f.Sort == "" {
+		if f.Query != "" {
+			f.Sort = library.SortRelevant
+		} else {
+			f.Sort = library.SortTitle
+		}
+	}
+
+	page, err := s.lib.ListBooks(r.Context(), f)
+	if err != nil {
+		if strings.Contains(err.Error(), "cursor") || strings.Contains(err.Error(), "unknown sort") {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.fail(w, r, err, "list books")
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+// handleGetBook serves the detail view.
+func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
+	id, err := intParam(r, "id")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad book id")
+		return
+	}
+	var userID int64
+	if u := s.currentUser(r); u != nil {
+		userID = u.ID
+	}
+	b, err := s.lib.GetBook(r.Context(), id, userID)
+	if err != nil {
+		s.fail(w, r, err, "get book")
+		return
+	}
+	writeJSON(w, http.StatusOK, b)
+}
+
+// handleFacets serves the sidebar.
+func (s *Server) handleFacets(w http.ResponseWriter, r *http.Request) {
+	f, err := s.lib.Facets(r.Context(), queryInt(r, "limit", 50))
+	if err != nil {
+		s.fail(w, r, err, "facets")
+		return
+	}
+	writeJSON(w, http.StatusOK, f)
+}
+
+// handleSuggest serves search-as-you-type.
+func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
+	out, err := s.lib.Suggest(r.Context(), r.URL.Query().Get("q"), queryInt(r, "limit", 10))
+	if err != nil {
+		s.fail(w, r, err, "suggest")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"suggestions": out})
+}

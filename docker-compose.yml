@@ -1,0 +1,56 @@
+# Production stack for Unraid. See deploy/README.md for the Unraid specifics.
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-klaras}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-klaras}
+      # Swedish collation: a, a and o are distinct letters sorting AFTER z, not
+      # variants of a and o. A generic ICU locale files "Akesson" under A.
+      # The schema also declares COLLATE library_sort on sort columns, so this
+      # is belt-and-braces rather than the only line of defence.
+      POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=sv-SE --encoding=UTF8"
+    volumes:
+      - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-klaras} -d ${POSTGRES_DB:-klaras}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Tuned for a library-sized working set on a NAS.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+      - -c
+      - work_mem=32MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - random_page_cost=1.1
+
+  klaras:
+    image: ghcr.io/karlmit/klaras-library:${KLARAS_TAG:-latest}
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      KLARAS_DATABASE_URL: postgres://${POSTGRES_USER:-klaras}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-klaras}?sslmode=disable
+      KLARAS_LIBRARY_ROOT: /library
+      KLARAS_INGEST_DIR: /ingest
+      KLARAS_CACHE_DIR: /cache
+      KLARAS_EXTERNAL_URL: ${KLARAS_EXTERNAL_URL:?must be the public https URL, required for Kobo download links}
+      KLARAS_LOG_LEVEL: ${KLARAS_LOG_LEVEL:-info}
+    ports:
+      - "${KLARAS_PORT:-8084}:8083"
+    volumes:
+      - ${LIBRARY_ROOT:?path to your ebook library}:/library
+      - ${INGEST_DIR:-./ingest}:/ingest
+      - ${DATA_DIR:-./data}/cache:/cache

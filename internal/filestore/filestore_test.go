@@ -1,0 +1,366 @@
+package filestore_test
+
+import (
+	"context"
+	"crypto/sha256"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Karlmit/Klaras-Library/internal/filestore"
+	"github.com/Karlmit/Klaras-Library/internal/store"
+	"github.com/Karlmit/Klaras-Library/internal/testdb"
+)
+
+func TestSanitiseComponentKeepsSwedish(t *testing.T) {
+	cases := []struct{ in, want, why string }{
+		{"Susanne Åkesson", "Susanne Åkesson", "Swedish letters are letters, not accents to strip"},
+		{"Bergström", "Bergström", "ö must survive"},
+		{"A/B: Test", "A B Test", "path separators and colons are replaced"},
+		{"trailing dots...", "trailing dots", "SMB dislikes trailing dots"},
+		{"  spaced   out  ", "spaced out", "whitespace collapses"},
+		{"", "Unknown", "empty gets a placeholder"},
+		{"CON", "CON_", "reserved on Windows, and this is served over SMB"},
+		{"a\x00b", "a b", "control characters are removed"},
+	}
+	for _, c := range cases {
+		if got := filestore.SanitiseComponent(c.in); got != c.want {
+			t.Errorf("SanitiseComponent(%q) = %q, want %q (%s)", c.in, got, c.want, c.why)
+		}
+	}
+}
+
+func TestSanitiseTruncatesOnBytesNotRunes(t *testing.T) {
+	// Swedish characters are two bytes in UTF-8, so a rune-based limit would
+	// still produce a component over the filesystem's 255-byte cap.
+	long := ""
+	for i := 0; i < 200; i++ {
+		long += "ö"
+	}
+	got := filestore.SanitiseComponent(long)
+	if len(got) > 120 {
+		t.Errorf("component is %d bytes, want <= 120", len(got))
+	}
+	// And it must still be valid UTF-8, not a split rune.
+	for _, r := range got {
+		if r == '�' {
+			t.Error("truncation split a multi-byte character")
+		}
+	}
+}
+
+func TestTemplateLayout(t *testing.T) {
+	tpl := filestore.DefaultTemplate()
+	idx := 3.0
+
+	plain := tpl.Dir(filestore.Meta{ID: 1, Title: "Röda Rummet", AuthorSort: "Strindberg, August"})
+	if plain != filepath.Join("Strindberg, August", "Röda Rummet") {
+		t.Errorf("plain layout = %q", plain)
+	}
+
+	series := tpl.Dir(filestore.Meta{
+		ID: 2, Title: "Isprinsessan", AuthorSort: "Läckberg, Camilla",
+		Series: "Fjällbacka", SeriesIndex: &idx,
+	})
+	if series != filepath.Join("Läckberg, Camilla", "Fjällbacka", "03 - Isprinsessan") {
+		t.Errorf("series layout = %q", series)
+	}
+
+	if base := tpl.FileBase(filestore.Meta{Title: "Röda Rummet", AuthorSort: "Strindberg, August"}); base != "Röda Rummet - Strindberg, August" {
+		t.Errorf("file base = %q", base)
+	}
+}
+
+func TestIsSafeRelativeRejectsTraversal(t *testing.T) {
+	for _, bad := range []string{"", "/abs/path", "../escape", "a/../../escape", "a/\x00b"} {
+		if filestore.IsSafeRelative(bad) {
+			t.Errorf("IsSafeRelative(%q) = true; this would let a metadata edit write outside the library", bad)
+		}
+	}
+	for _, ok := range []string{"Author/Title", "Åkesson, Susanne/Bok"} {
+		if !filestore.IsSafeRelative(ok) {
+			t.Errorf("IsSafeRelative(%q) = false, want true", ok)
+		}
+	}
+}
+
+// --- integration ------------------------------------------------------------
+
+type fx struct {
+	st   *filestore.Store
+	pool *pgxpool.Pool
+	root string
+	id   int64
+}
+
+func setup(t *testing.T) *fx {
+	t.Helper()
+	dsn := testdb.For(t, os.Getenv("KLARAS_TEST_DATABASE_URL"), "filestore")
+	ctx := context.Background()
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	if err := store.Migrate(ctx, dsn, log); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(ctx, dsn, 4, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(db.Close)
+
+	if _, err := db.Pool.Exec(ctx, `
+		TRUNCATE books, authors, book_authors, book_files, file_operations
+		RESTART IDENTITY CASCADE`); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "Old Author", "Old Title")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"book.epub", "cover.jpg"} {
+		if err := os.WriteFile(filepath.Join(oldDir, f), []byte("content of "+f), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var id int64
+	if err := db.Pool.QueryRow(ctx, `
+		INSERT INTO books (uuid, title, author_sort, path)
+		VALUES (gen_random_uuid(), 'Röda Rummet', 'Strindberg, August', 'Old Author/Old Title')
+		RETURNING id`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `
+		INSERT INTO book_files (book_id, format, filename, size_bytes)
+		VALUES ($1,'EPUB','book.epub',20)`, id); err != nil {
+		t.Fatal(err)
+	}
+
+	return &fx{
+		st:   filestore.New(root, filestore.DefaultTemplate(), db.Pool, log),
+		pool: db.Pool, root: root, id: id,
+	}
+}
+
+func TestApplyMovesFilesAndUpdatesDatabase(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+
+	plan, err := f.st.PlanFor(ctx, f.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join("Strindberg, August", "Röda Rummet")
+	if plan.ToDir != want {
+		t.Fatalf("plan targets %q, want %q", plan.ToDir, want)
+	}
+	if err := f.st.Apply(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+
+	// Files landed, with Swedish characters intact on disk.
+	newFile := filepath.Join(f.root, want, "Röda Rummet - Strindberg, August.epub")
+	if _, err := os.Stat(newFile); err != nil {
+		t.Errorf("moved file not found at %s: %v", newFile, err)
+	}
+	if _, err := os.Stat(filepath.Join(f.root, want, "cover.jpg")); err != nil {
+		t.Error("cover did not travel with the book")
+	}
+	// The old directory is gone, not left behind empty.
+	if _, err := os.Stat(filepath.Join(f.root, "Old Author")); !os.IsNotExist(err) {
+		t.Error("empty source directory was not pruned")
+	}
+
+	var dbPath, dbName string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT b.path, f.filename FROM books b JOIN book_files f ON f.book_id=b.id WHERE b.id=$1`,
+		f.id).Scan(&dbPath, &dbName); err != nil {
+		t.Fatal(err)
+	}
+	if dbPath != want {
+		t.Errorf("books.path = %q, want %q", dbPath, want)
+	}
+	if dbName != "Röda Rummet - Strindberg, August.epub" {
+		t.Errorf("book_files.filename = %q", dbName)
+	}
+
+	// The journal closed cleanly.
+	var open int
+	if err := f.pool.QueryRow(ctx,
+		`SELECT count(*) FROM file_operations WHERE state IN ('pending','staged')`).Scan(&open); err != nil {
+		t.Fatal(err)
+	}
+	if open != 0 {
+		t.Errorf("%d journal entries left open after a successful move", open)
+	}
+}
+
+// TestReconcileAfterCrashBetweenMoveAndCommit simulates the exact failure the
+// journal exists for: the file reached its destination but the process died
+// before the database was updated.
+func TestReconcileAfterCrashBetweenMoveAndCommit(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+
+	oldAbs := filepath.Join(f.root, "Old Author", "Old Title", "book.epub")
+	newDir := filepath.Join(f.root, "Strindberg, August", "Röda Rummet")
+	newAbs := filepath.Join(newDir, "Röda Rummet - Strindberg, August.epub")
+
+	// Journal the intent, do the move, then stop -- as a crash would.
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO file_operations (book_id, op, src, dst, state)
+		VALUES ($1,'move',$2,$3,'staged')`, f.id, oldAbs, newAbs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(oldAbs, newAbs); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := f.st.Reconcile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Completed != 1 {
+		t.Errorf("reconcile completed %d operations, want 1 (report: %+v)", rep.Completed, rep)
+	}
+
+	var dbPath, dbName string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT b.path, fl.filename FROM books b JOIN book_files fl ON fl.book_id=b.id WHERE b.id=$1`,
+		f.id).Scan(&dbPath, &dbName); err != nil {
+		t.Fatal(err)
+	}
+	if dbPath != filepath.Join("Strindberg, August", "Röda Rummet") {
+		t.Errorf("database still points at %q after recovery", dbPath)
+	}
+	if dbName != "Röda Rummet - Strindberg, August.epub" {
+		t.Errorf("filename not recovered: %q", dbName)
+	}
+}
+
+// TestReconcileWhenMoveNeverStarted must leave everything alone.
+func TestReconcileWhenMoveNeverStarted(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+
+	oldAbs := filepath.Join(f.root, "Old Author", "Old Title", "book.epub")
+	newAbs := filepath.Join(f.root, "Strindberg, August", "Röda Rummet", "x.epub")
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO file_operations (book_id, op, src, dst, state)
+		VALUES ($1,'move',$2,$3,'pending')`, f.id, oldAbs, newAbs); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := f.st.Reconcile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.RolledBack != 1 {
+		t.Errorf("rolled back %d, want 1 (report: %+v)", rep.RolledBack, rep)
+	}
+	var dbPath string
+	if err := f.pool.QueryRow(ctx, `SELECT path FROM books WHERE id=$1`, f.id).Scan(&dbPath); err != nil {
+		t.Fatal(err)
+	}
+	if dbPath != "Old Author/Old Title" {
+		t.Errorf("path changed to %q even though the move never happened", dbPath)
+	}
+	if _, err := os.Stat(oldAbs); err != nil {
+		t.Error("source file was disturbed by a move that never ran")
+	}
+}
+
+// TestReconcileWithBothCopiesPresent covers an interrupted cross-filesystem copy.
+func TestReconcileWithBothCopiesPresent(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+
+	oldAbs := filepath.Join(f.root, "Old Author", "Old Title", "book.epub")
+	newDir := filepath.Join(f.root, "Strindberg, August", "Röda Rummet")
+	newAbs := filepath.Join(newDir, "Röda Rummet - Strindberg, August.epub")
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(oldAbs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newAbs, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO file_operations (book_id, op, src, dst, sha256, state)
+		VALUES ($1,'move',$2,$3,$4,'staged')`,
+		f.id, oldAbs, newAbs, sha256Of(data)); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := f.st.Reconcile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Duplicates != 1 {
+		t.Errorf("resolved %d duplicates, want 1 (report: %+v)", rep.Duplicates, rep)
+	}
+	if _, err := os.Stat(oldAbs); !os.IsNotExist(err) {
+		t.Error("source still present after the destination was verified")
+	}
+	if _, err := os.Stat(newAbs); err != nil {
+		t.Error("verified destination was removed")
+	}
+}
+
+// TestReconcileFlagsLostFiles is the one case that needs a human.
+func TestReconcileFlagsLostFiles(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO file_operations (book_id, op, src, dst, state)
+		VALUES ($1,'move',$2,$3,'staged')`,
+		f.id, filepath.Join(f.root, "gone", "a.epub"), filepath.Join(f.root, "also-gone", "b.epub")); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := f.st.Reconcile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Lost != 1 {
+		t.Errorf("recorded %d lost, want 1 (report: %+v)", rep.Lost, rep)
+	}
+	var flagged bool
+	var reasons []string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT needs_review, review_reasons FROM books WHERE id=$1`, f.id).
+		Scan(&flagged, &reasons); err != nil {
+		t.Fatal(err)
+	}
+	if !flagged {
+		t.Error("book was not flagged for review after both copies went missing")
+	}
+	var found bool
+	for _, r := range reasons {
+		if r == "file_lost_during_move" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("review reasons = %v, want file_lost_during_move", reasons)
+	}
+}
+
+func sha256Of(b []byte) []byte {
+	h := sha256.New()
+	h.Write(b)
+	return h.Sum(nil)
+}
