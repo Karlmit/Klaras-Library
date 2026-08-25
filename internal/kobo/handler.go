@@ -271,6 +271,12 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 	tok := SyncTokenFromRequest(r)
 	ctx := r.Context()
 
+	// Anything announced up to the watermark the device is sending back has
+	// demonstrably reached it. Do this before the watermark is advanced below.
+	if err := h.engine.confirmDelivered(ctx, u.ID, tok.BooksLastModified); err != nil {
+		h.log.Error("kobo sync: confirm delivered", "err", err, "user", u.ID)
+	}
+
 	items := make([]any, 0, h.syncLimit)
 	contSync := false
 
@@ -391,7 +397,7 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.engine.markSynced(ctx, u.ID, syncedIDs); err != nil {
+	if err := h.engine.markSynced(ctx, u.ID, syncedIDs, newest); err != nil {
 		h.log.Error("kobo sync: mark synced", "err", err)
 	}
 

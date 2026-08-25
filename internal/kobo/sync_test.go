@@ -683,3 +683,51 @@ func decodeJSON(t *testing.T, res *http.Response, v any) {
 		t.Fatalf("decode: %v", err)
 	}
 }
+
+// TestUnacknowledgedSyncIsReannounced is the guard for a silent, permanent
+// failure mode.
+//
+// A book is announced as new once, then as changed. ChangedEntitlement tells
+// the device it already owns the book and only needs fresh metadata, so it
+// downloads nothing. Marking books as sent the moment the response was written
+// meant any sync the device never received -- a dropped connection, a proxy
+// that swallowed it, a request made on the device's behalf while debugging --
+// demoted those books forever. Sync then reported success and the collection
+// appeared with no books in it.
+//
+// The device acknowledges by sending a watermark back. Until it does, books
+// stay new.
+func TestUnacknowledgedSyncIsReannounced(t *testing.T) {
+	f := newFixture(t, 3)
+
+	items, token, _ := f.sync("")
+	if got := countKinds(items)["NewEntitlement"]; got != 3 {
+		t.Fatalf("first sync sent %d NewEntitlement, want 3", got)
+	}
+	if token == "" {
+		t.Fatal("first sync issued no sync token")
+	}
+
+	// The device never stored that token -- it asks again from the beginning.
+	items, _, _ = f.sync("")
+	if got := countKinds(items)["NewEntitlement"]; got != 3 {
+		t.Errorf("unacknowledged books came back as %v, want 3 NewEntitlement; "+
+			"a book announced into a response the device never received must "+
+			"stay new or it can never download", countKinds(items))
+	}
+
+	// Now the device does come back with the token, which is proof it kept the
+	// response. The books are past the watermark, so nothing is resent.
+	items, _, _ = f.sync(token)
+	if n := len(items); n != 0 {
+		t.Errorf("acknowledged sync resent %d items, want 0: %v", n, countKinds(items))
+	}
+
+	// Asking again from the beginning now yields changes, not new books: the
+	// device has confirmed it holds them.
+	items, _, _ = f.sync("")
+	kinds := countKinds(items)
+	if kinds["ChangedEntitlement"] != 3 || kinds["NewEntitlement"] != 0 {
+		t.Errorf("after acknowledgement got %v, want 3 ChangedEntitlement and 0 NewEntitlement", kinds)
+	}
+}

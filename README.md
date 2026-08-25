@@ -309,11 +309,13 @@ store position is not advanced, so nothing is lost.
 **No special configuration is needed.** A plain proxy to the container is
 enough; the defaults in Nginx Proxy Manager, Caddy or Traefik will do.
 
-One thing genuinely does matter:
+Two things genuinely do matter:
 
 - **TLS 1.2 must be enabled.** Kobo firmware ships an old TLS client, and a
   "modern compatibility" profile that permits only TLS 1.3 will fail. This is
   a setting on your proxy, not here.
+- **`/kobo/` must not sit behind SSO.** See below; this one fails silently, with
+  every request returning 200.
 
 Notably **not** required, unlike calibre-web: forwarding `X-Forwarded-Proto`
 or `X-Scheme`. Download URLs are built from `KLARAS_EXTERNAL_URL` rather than
@@ -321,11 +323,49 @@ guessed from the request, so the "Kobo gets http:// links and fails silently"
 problem cannot happen. `KLARAS_EXTERNAL_URL` must be the URL the *device* can
 reach, and the server refuses to start if it is not https.
 
-If you are removing an SSO layer such as authentik that used to sit in front of
-calibre-web, you can delete its whole custom configuration block, including the
-`location ^~ /kobo/ { auth_request off; ... }` carve-out that existed to let the
-device past the login screen. Just repoint the proxy's forward port at Klaras
-Library. Do read **Exposing it to the internet** below first.
+#### If SSO sits in front of the library
+
+**Keep the `/kobo/` carve-out.** If a forward-auth layer such as authentik,
+Authelia or oauth2-proxy guards the host, device traffic must be exempted from
+it. A Kobo has no browser, no cookie jar and no way to complete a login
+redirect, so anything that expects it to authenticate interactively will fail.
+
+An earlier version of this file said the carve-out could be deleted once you
+moved off calibre-web. That was wrong, and it is worth being specific about the
+failure it causes, because nothing in either application's logs points at it:
+sync appears to work. Requests reach the server, every one returns 200, and the
+device still reports "sync failed" -- because the auth layer is rewriting
+responses on the way back out, which the application behind it cannot see.
+
+For Nginx Proxy Manager with authentik, keep a block like this in the proxy
+host's **Advanced** tab, pointed at Klaras Library's port:
+
+```nginx
+location ^~ /kobo/ {
+    auth_request off;                        # a Kobo cannot do SSO
+
+    proxy_pass http://192.168.1.66:8084;     # Klaras Library
+
+    proxy_set_header Host             $http_host;
+    proxy_set_header X-Real-IP        $remote_addr;
+    proxy_set_header X-Forwarded-For  $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+
+    proxy_set_header Connection "";          # not a websocket
+    proxy_redirect off;
+}
+```
+
+Two lines carry the weight. `auth_request off` keeps the SSO layer out of the
+device's way, and with it the `Set-Cookie` such layers staple onto every
+response. `Connection ""` undoes the `Connection 'upgrade'` that the stock
+proxy block sets on *all* traffic, not just websockets.
+
+The browser UI stays behind SSO, which is the arrangement you want: the device
+is authenticated by the secret in its own URL, which is the only credential it
+has.
+
+Do read **Exposing it to the internet** below.
 
 ### Exposing it to the internet
 

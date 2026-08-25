@@ -76,6 +76,7 @@ func (e *Engine) changedBooks(ctx context.Context, userID int64, since time.Time
 		JOIN books b ON b.id = sy.book_id
 		LEFT JOIN publishers p       ON p.id = b.publisher_id
 		LEFT JOIN kobo_synced_books ks ON ks.book_id = b.id AND ks.user_id = $1
+		                              AND ks.confirmed
 		LEFT JOIN kobo_archived ka     ON ka.book_id = b.id AND ka.user_id = $1
 		WHERE ka.book_id IS NULL
 		  AND GREATEST(b.updated_at, sy.added_at) > $2
@@ -144,15 +145,41 @@ func (e *Engine) removedBooks(ctx context.Context, userID int64, since time.Time
 	return out, rows.Err()
 }
 
-// markSynced records that the device has been told about these books.
-func (e *Engine) markSynced(ctx context.Context, userID int64, ids []int64) error {
+// markSynced records that these books were announced, and the watermark they
+// were announced with.
+//
+// This is not yet a claim that the device has them: see confirmDelivered. A row
+// that is already confirmed stays confirmed, so re-announcing a changed book
+// does not undo what the device has told us it kept.
+func (e *Engine) markSynced(ctx context.Context, userID int64, ids []int64, watermark time.Time) error {
 	if len(ids) == 0 {
 		return nil
 	}
 	_, err := e.pool.Exec(ctx, `
-		INSERT INTO kobo_synced_books (user_id, book_id, first_synced_at, last_synced_at)
-		SELECT $1, unnest($2::bigint[]), now(), now()
-		ON CONFLICT (user_id, book_id) DO UPDATE SET last_synced_at = now()`, userID, ids)
+		INSERT INTO kobo_synced_books
+		       (user_id, book_id, first_synced_at, last_synced_at, announced_watermark)
+		SELECT $1, unnest($2::bigint[]), now(), now(), $3
+		ON CONFLICT (user_id, book_id) DO UPDATE
+		SET last_synced_at      = now(),
+		    announced_watermark = EXCLUDED.announced_watermark`, userID, ids, watermark)
+	return err
+}
+
+// confirmDelivered promotes announcements the device has acknowledged.
+//
+// The acknowledgement is the sync token itself. The device only sends back a
+// watermark it has stored, so a request carrying one at or past the watermark a
+// book was announced with is proof that response was received and kept. Books
+// announced later, or announced to nobody because the response never arrived,
+// stay unconfirmed and are announced again as new.
+func (e *Engine) confirmDelivered(ctx context.Context, userID int64, watermark time.Time) error {
+	_, err := e.pool.Exec(ctx, `
+		UPDATE kobo_synced_books
+		SET confirmed = true
+		WHERE user_id = $1
+		  AND NOT confirmed
+		  AND announced_watermark IS NOT NULL
+		  AND announced_watermark <= $2`, userID, watermark)
 	return err
 }
 
