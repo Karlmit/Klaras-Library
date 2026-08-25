@@ -1,72 +1,51 @@
-# Klaras Library — copy this file, edit the four values marked CHANGE ME, run:
-#
-#   docker compose up -d
-#
-# Then open http://<your-server>:8084 and create the first admin account.
-
 services:
-  klaras:
+  klaras-library:
     image: ghcr.io/karlmit/klaras-library:latest
     container_name: klaras-library
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "8084:8083"          # host:container. 8083 is often already taken by calibre-web.
+    # Unraid's nobody:users. Without this the container runs as uid 1000 and
+    # cannot write to your shares, so ingest, covers and reorganize all fail.
+    user: "99:100"
     environment:
-      KLARAS_DATABASE_URL: postgres://klaras:CHANGE_ME_DB_PASSWORD@postgres:5432/klaras?sslmode=disable
-
-      # CHANGE ME — the public HTTPS URL this server is reached at.
-      # Kobo devices are handed absolute download URLs, so this must be the
-      # address the DEVICE can resolve, not the container's. It must be https:
-      # Kobo firmware fails silently on plain-http downloads.
-      KLARAS_EXTERNAL_URL: https://library.example.com
-
-      KLARAS_LOG_LEVEL: info
-
-      # Let the device still reach the real Kobo shop for everything that is
-      # not your library. Off keeps it from talking to Kobo at all.
-      KLARAS_KOBO_PROXY_STORE: "false"
-
-      # Managed folder layout. Placeholders: {author_sort} {series}
-      # {series_index} {title} {year} {id}
-      KLARAS_PATH_TEMPLATE_SERIES: "{author_sort}/{series}/{series_index} - {title}"
-      KLARAS_PATH_TEMPLATE_PLAIN: "{author_sort}/{title}"
-      KLARAS_FILE_TEMPLATE: "{title} - {author_sort}"
-
-      # Background workers. Raise convert workers if you have spare CPU and a
-      # large KEPUB backlog.
-      KLARAS_COVER_WORKERS: "4"
-      KLARAS_CONVERT_WORKERS: "2"
-
+      - TZ=Europe/Stockholm
+      - KLARAS_DATABASE_URL=postgres://klaras:CHANGE_ME_DB_PASSWORD@klaras-postgres:5432/klaras?sslmode=disable
+      # The public HTTPS URL this server is reached at. Kobo devices are handed
+      # absolute download URLs, so this must be what the DEVICE can resolve,
+      # not the container. Must be https: Kobo fails silently on plain http.
+      - KLARAS_EXTERNAL_URL=https://library.example.com
+      - KLARAS_LOG_LEVEL=info
+      # Let the device still reach the real Kobo shop for anything that is not
+      # your library. "false" keeps it from talking to Kobo at all.
+      - KLARAS_KOBO_PROXY_STORE=false
     volumes:
-      # CHANGE ME — your ebook library. Klaras owns this tree and will move
-      # files within it, so point it at your library, not a parent folder.
+      # Your ebook library. Klaras owns this tree and moves files within it, so
+      # point it at the library itself, not a parent folder.
       - /mnt/user/books/library:/library
-
       # Drop ebook files here and they are imported automatically.
       - /mnt/user/books/ingest:/ingest
-
-      # Cover thumbnails and converted KEPUBs. Expect roughly 170 kB per book;
-      # a 28,000-book library uses about 5 GB. Safe to delete — it regenerates.
+      # Cover thumbnails and converted KEPUBs. About 170 kB per book, so ~5 GB
+      # for 28,000 books. Safe to delete; it regenerates.
       - /mnt/user/appdata/klaras-library/cache:/cache
+    ports:
+      # 8083 is usually already taken by calibre-web, so the host side is 8084.
+      - 8084:8083
+    depends_on:
+      klaras-postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
-  postgres:
+  klaras-postgres:
     image: postgres:17-alpine
     container_name: klaras-postgres
-    restart: unless-stopped
     environment:
-      POSTGRES_USER: klaras
-      POSTGRES_DB: klaras
-      # CHANGE ME — must match the password in KLARAS_DATABASE_URL above.
-      POSTGRES_PASSWORD: CHANGE_ME_DB_PASSWORD
-
+      - TZ=Europe/Stockholm
+      - POSTGRES_USER=klaras
+      - POSTGRES_DB=klaras
+      # Must match the password in KLARAS_DATABASE_URL above.
+      - POSTGRES_PASSWORD=CHANGE_ME_DB_PASSWORD
       # Swedish collation: å, ä and ö are distinct letters sorting after z, not
-      # variants of a and o. Change sv-SE to your own locale if your library is
-      # in another language; it can only be set when the database is first
-      # created, so pick it before the first run.
-      POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=sv-SE --encoding=UTF8"
+      # variants of a and o. This can only be set when the database is first
+      # created, so choose it before the first start.
+      - POSTGRES_INITDB_ARGS=--locale-provider=icu --icu-locale=sv-SE --encoding=UTF8
     volumes:
       - /mnt/user/appdata/klaras-library/postgres:/var/lib/postgresql/data
     healthcheck:
@@ -74,15 +53,4 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-    command:
-      - postgres
-      - -c
-      - shared_buffers=512MB
-      - -c
-      - effective_cache_size=1536MB
-      - -c
-      - work_mem=32MB
-      - -c
-      - maintenance_work_mem=256MB
-      - -c
-      - random_page_cost=1.1      # the data directory is on SSD, not spinning disk
+    restart: unless-stopped

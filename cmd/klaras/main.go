@@ -61,6 +61,8 @@ func run() error {
 		return cmdBackfillCovers()
 	case "reorganize", "reorganise":
 		return cmdReorganize()
+	case "revert-moves":
+		return cmdRevertMoves()
 	case "doctor":
 		return cmdDoctor()
 	case "version":
@@ -89,6 +91,8 @@ Usage:
   klaras reorganize [--dry-run] [--out FILE]
                           Bring the file tree into line with the path template.
                           DESTRUCTIVE: always review --dry-run output first.
+  klaras revert-moves --since TIME [--dry-run]
+                          Undo file moves made since TIME, using the journal
   klaras doctor           Check the library for problems (read-only)
   klaras dev-seed --books N
                           Replace the library with N synthetic books, for
@@ -499,6 +503,74 @@ func cmdReorganize() error {
 		fmt.Fprintf(os.Stderr, "  moved      %d\n", rep.Applied)
 	}
 	fmt.Fprintf(os.Stderr, "  failed     %d\n", rep.Failed)
+	return nil
+}
+
+func cmdRevertMoves() error {
+	fs := flag.NewFlagSet("revert-moves", flag.ExitOnError)
+	sinceStr := fs.String("since", "", "undo moves completed at or after this time "+
+		"(RFC3339, e.g. 2026-08-25T12:00:00Z, or a duration like 2h)")
+	dryRun := fs.Bool("dry-run", false, "list what would be undone, without touching anything")
+	yes := fs.Bool("yes", false, "skip the confirmation prompt")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
+	if *sinceStr == "" {
+		return fmt.Errorf("--since is required, so a revert can never walk back " +
+			"further than you intended")
+	}
+
+	var since time.Time
+	if d, err := time.ParseDuration(*sinceStr); err == nil {
+		since = time.Now().Add(-d)
+	} else if t, err := time.Parse(time.RFC3339, *sinceStr); err == nil {
+		since = t
+	} else {
+		return fmt.Errorf("--since must be RFC3339 (2026-08-25T12:00:00Z) or a duration (2h)")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	db, err := store.Open(ctx, cfg.DatabaseURL, cfg.DBMaxConns, log)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	files := filestore.New(cfg.LibraryRoot, filestore.Template{
+		WithSeries: cfg.PathTemplateSeries,
+		Plain:      cfg.PathTemplatePlain,
+		File:       cfg.FileTemplate,
+	}, db.Pool, log)
+
+	if !*dryRun && !*yes {
+		return fmt.Errorf("revert-moves moves files on disk. " +
+			"Run with --dry-run first, then re-run with --yes")
+	}
+
+	var out io.Writer
+	if *dryRun {
+		out = os.Stderr
+	}
+	rep, err := files.Revert(ctx, since, *dryRun, out, log)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "\n%s in %s\n",
+		map[bool]string{true: "DRY RUN (nothing was changed)", false: "Reverted"}[*dryRun],
+		rep.Elapsed.Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "  moves since %s   %d\n", since.Format(time.RFC3339), rep.Candidates)
+	if !*dryRun {
+		fmt.Fprintf(os.Stderr, "  undone                            %d\n", rep.Reverted)
+	}
+	fmt.Fprintf(os.Stderr, "  skipped (already back, or occupied) %d\n", rep.Skipped)
+	fmt.Fprintf(os.Stderr, "  failed                              %d\n", rep.Failed)
 	return nil
 }
 

@@ -55,25 +55,96 @@ critical query starts sequentially scanning `books`.
 
 ## Quick start
 
-```bash
-curl -O https://raw.githubusercontent.com/Karlmit/Klaras-Library/main/docker-compose.example.yml
-mv docker-compose.example.yml docker-compose.yml
-# edit the four values marked CHANGE ME
-docker compose up -d
+Copy this into `docker-compose.yml`, change the four marked values, then
+`docker compose up -d` and open `http://<your-server>:8084`.
+
+```yaml
+services:
+  klaras-library:
+    image: ghcr.io/karlmit/klaras-library:latest
+    container_name: klaras-library
+    # Unraid's nobody:users. Without this the container runs as uid 1000 and
+    # cannot write to your shares, so ingest, covers and reorganize all fail.
+    user: "99:100"
+    environment:
+      - TZ=Europe/Stockholm
+      - KLARAS_DATABASE_URL=postgres://klaras:CHANGE_ME_DB_PASSWORD@klaras-postgres:5432/klaras?sslmode=disable
+      # The public HTTPS URL this server is reached at. Kobo devices are handed
+      # absolute download URLs, so this must be what the DEVICE can resolve,
+      # not the container. Must be https: Kobo fails silently on plain http.
+      - KLARAS_EXTERNAL_URL=https://library.example.com
+      - KLARAS_LOG_LEVEL=info
+      # Let the device still reach the real Kobo shop for anything that is not
+      # your library. "false" keeps it from talking to Kobo at all.
+      - KLARAS_KOBO_PROXY_STORE=false
+    volumes:
+      # Your ebook library. Klaras owns this tree and moves files within it, so
+      # point it at the library itself, not a parent folder.
+      - /mnt/user/books/library:/library
+      # Drop ebook files here and they are imported automatically.
+      - /mnt/user/books/ingest:/ingest
+      # Cover thumbnails and converted KEPUBs. About 170 kB per book, so ~5 GB
+      # for 28,000 books. Safe to delete; it regenerates.
+      - /mnt/user/appdata/klaras-library/cache:/cache
+    ports:
+      # 8083 is usually already taken by calibre-web, so the host side is 8084.
+      - 8084:8083
+    depends_on:
+      klaras-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  klaras-postgres:
+    image: postgres:17-alpine
+    container_name: klaras-postgres
+    environment:
+      - TZ=Europe/Stockholm
+      - POSTGRES_USER=klaras
+      - POSTGRES_DB=klaras
+      # Must match the password in KLARAS_DATABASE_URL above.
+      - POSTGRES_PASSWORD=CHANGE_ME_DB_PASSWORD
+      # Swedish collation: å, ä and ö are distinct letters sorting after z, not
+      # variants of a and o. This can only be set when the database is first
+      # created, so choose it before the first start.
+      - POSTGRES_INITDB_ARGS=--locale-provider=icu --icu-locale=sv-SE --encoding=UTF8
+    volumes:
+      - /mnt/user/appdata/klaras-library/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U klaras -d klaras"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
 ```
 
-Open `http://<your-server>:8084` and create the first admin account.
+The four things to change:
+
+| | |
+|---|---|
+| `CHANGE_ME_DB_PASSWORD` | in **both** places — they must match |
+| `KLARAS_EXTERNAL_URL` | the public https URL, as the Kobo will see it |
+| `/mnt/user/books/library` | your library folder |
+| `TZ` | your timezone |
+
+Two Unraid details worth not skipping:
+
+- **`user: "99:100"`** is required. Without it the container runs as uid 1000
+  and cannot write to your shares, so ingest, cover generation and reorganize
+  all fail with permission errors.
+- **`8084:8083`** because calibre-web usually already holds 8083. Run both side
+  by side until you are happy, then switch.
 
 The image is published to GitHub Container Registry for `linux/amd64` and
 `linux/arm64`:
 
 ```
 ghcr.io/karlmit/klaras-library:latest
-ghcr.io/karlmit/klaras-library:1.0.0
+ghcr.io/karlmit/klaras-library:1.0
+ghcr.io/karlmit/klaras-library:1.0.1
 ```
 
-`:latest` is republished on every release, so Unraid's update check sees the new
-digest and offers the update.
+`:latest` is republished on every release, so Unraid's update check sees the
+new digest and offers the update.
 
 ## Importing an existing Calibre library
 
@@ -103,6 +174,32 @@ Suspect data is imported faithfully and **flagged**, never silently corrected.
 On the library this was built against that surfaced 1,115 books with a merged
 author name (`Adler-Olsen;Jussi`, `A. Trunk| P. Erlandsson`), 738 possible
 duplicates and 5 implausible dates. They appear under **Needs review** in the UI.
+
+## Order of operations on first run
+
+Everything up to the last step is reversible. `reorganize` is the point of no
+return, because it is what makes your existing calibre-web unusable.
+
+1. **`docker compose up -d`** — creates an empty database and starts the server.
+2. **Import** (below). Both source databases are opened read-only, so
+   calibre-web keeps working and nothing on disk changes.
+3. **Browse and search.** Check the books, covers and categories look right.
+4. **Point one Kobo at it** and confirm a shelf syncs and a book opens.
+5. **Live with it for a while.** Until this point, rolling back is just
+   pointing the device's `api_store` back at calibre-web.
+6. **Only then `reorganize`** — and review the `--dry-run` plan first.
+
+Do not run `reorganize` before step 1. It never touches `metadata.db`, so
+moving files first would leave Calibre's catalogue pointing at the old paths,
+and the import in step 2 would then produce a library where every book points
+at a file that is no longer there.
+
+If the new layout turns out wrong, the move journal makes it undoable:
+
+```bash
+docker compose exec klaras-library klaras revert-moves --since 24h --dry-run
+docker compose exec klaras-library klaras revert-moves --since 24h --yes
+```
 
 ## Kobo setup
 
@@ -145,12 +242,17 @@ klaras serve                Run the server (default)
 klaras import               Import a Calibre library and calibre-web state
 klaras reorganize           Bring the file tree in line with the path template
 klaras backfill-covers      Generate thumbnails for the whole library
+klaras revert-moves         Undo file moves, using the journal
 klaras doctor               Report library problems (read-only)
 klaras migrate [up|down|status]
 klaras dev-seed --books N   Synthetic books, for benchmarking on your own hardware
 ```
 
-`reorganize` moves files and refuses to run without `--dry-run` first.
+`reorganize` moves files and refuses to run without `--dry-run` first. On a
+library imported from Calibre it will move **every** book, because Calibre
+transliterates non-ASCII characters out of folder names: `A U Baath/Islandska
+sagor (8)` becomes `Bååth, A U/Isländska sagor`. Review the plan, and see
+**Order of operations** above for when to run it.
 
 ## Development
 

@@ -89,5 +89,8 @@ tidy: ## Tidy go.mod
 ## ---- docker ---------------------------------------------------------------
 
 .PHONY: docker-build
-docker-build: ## Build the production image
-	docker build -t klaras-library:$(VERSION) .
+docker-build: ## Build the production image (the SPA is built inside it)
+	docker build -t klaras-library:$(VERSION) \
+	  --build-arg VERSION=$(VERSION) \
+	  --build-arg REVISION=$$(git rev-parse HEAD) \
+	  --build-arg CREATED=$$(date -u +%Y-%m-%dT%H:%M:%SZ) .

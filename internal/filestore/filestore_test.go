@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -363,4 +364,127 @@ func sha256Of(b []byte) []byte {
 	h := sha256.New()
 	h.Write(b)
 	return h.Sum(nil)
+}
+
+// TestReorganizeIsReversible is the safety net behind the one operation that
+// touches the whole library at once.
+//
+// Reorganize renames every book folder, and on the library this was built
+// against that is 28,000 directories in one go. The journal records src and dst
+// for each move, so "what if the layout is wrong" should be answerable with a
+// command rather than with a restore from backup.
+func TestReorganizeIsReversible(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	originalDir := filepath.Join(f.root, "Old Author", "Old Title")
+	originalFile := filepath.Join(originalDir, "book.epub")
+	before, err := os.ReadFile(originalFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Everything after this instant is what a revert should walk back.
+	mark := time.Now().Add(-time.Second)
+
+	plan, err := f.st.PlanFor(ctx, f.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.st.Apply(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(originalFile); !os.IsNotExist(err) {
+		t.Fatal("setup failed: the file did not move")
+	}
+
+	// A dry run must report the work without doing any of it.
+	dry, err := f.st.Revert(ctx, mark, true, nil, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dry.Candidates == 0 {
+		t.Fatal("dry run found no moves to undo")
+	}
+	if dry.Reverted != 0 {
+		t.Errorf("dry run undid %d moves; it must change nothing", dry.Reverted)
+	}
+	if _, err := os.Stat(originalFile); !os.IsNotExist(err) {
+		t.Error("dry run moved a file")
+	}
+
+	rep, err := f.st.Revert(ctx, mark, false, nil, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Reverted == 0 {
+		t.Fatal("revert undid nothing")
+	}
+	if rep.Failed != 0 {
+		t.Errorf("%d reverts failed", rep.Failed)
+	}
+
+	// The file is back, byte for byte.
+	after, err := os.ReadFile(originalFile)
+	if err != nil {
+		t.Fatalf("file did not come back to %s: %v", originalFile, err)
+	}
+	if string(after) != string(before) {
+		t.Error("file contents changed across the round trip")
+	}
+
+	// And so is the database.
+	var dbPath, dbName string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT b.path, fl.filename FROM books b JOIN book_files fl ON fl.book_id=b.id WHERE b.id=$1`,
+		f.id).Scan(&dbPath, &dbName); err != nil {
+		t.Fatal(err)
+	}
+	if dbPath != "Old Author/Old Title" {
+		t.Errorf("books.path = %q after revert, want the original", dbPath)
+	}
+	if dbName != "book.epub" {
+		t.Errorf("filename = %q after revert, want book.epub", dbName)
+	}
+
+	// Running it twice must be safe.
+	again, err := f.st.Revert(ctx, mark, false, nil, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Reverted != 0 {
+		t.Errorf("a second revert undid %d more moves; it should be a no-op", again.Reverted)
+	}
+}
+
+// TestRevertRespectsTheSinceBoundary makes sure one reorganize can be undone
+// without disturbing earlier, deliberate moves.
+func TestRevertRespectsTheSinceBoundary(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	plan, err := f.st.PlanFor(ctx, f.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.st.Apply(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+
+	// A boundary set after the move: nothing should be in scope.
+	rep, err := f.st.Revert(ctx, time.Now().Add(time.Minute), false, nil, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Candidates != 0 || rep.Reverted != 0 {
+		t.Errorf("revert reached back past --since: %d candidates, %d undone",
+			rep.Candidates, rep.Reverted)
+	}
+	moved := filepath.Join(f.root, "Strindberg, August", "Röda Rummet",
+		"Röda Rummet - Strindberg, August.epub")
+	if _, err := os.Stat(moved); err != nil {
+		t.Error("a move outside the --since window was undone anyway")
+	}
 }
