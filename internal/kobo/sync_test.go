@@ -900,3 +900,54 @@ func TestResyncIgnoresTheDeviceWatermark(t *testing.T) {
 			"record must actually resend the books", countKinds(items))
 	}
 }
+
+// TestSyncEmitsTwoLetterLanguage is the end-to-end guard for the conversion.
+//
+// Calibre stores ISO 639-2 and the device wants ISO 639-1, and a unit test on
+// the helper would not have caught this: the helper existed, it was just never
+// doing the conversion. What matters is the code on the wire.
+func TestSyncEmitsTwoLetterLanguage(t *testing.T) {
+	f := newFixture(t, 2)
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE books SET languages = ARRAY['swe'] WHERE id = ANY($1)`, f.books); err != nil {
+		t.Fatal(err)
+	}
+
+	items, _, _ := f.sync("")
+	seen := 0
+	for _, it := range items {
+		for _, raw := range it {
+			var v struct {
+				BookMetadata struct {
+					Language     string `json:"Language"`
+					DownloadUrls []struct {
+						Format string `json:"Format"`
+					} `json:"DownloadUrls"`
+				} `json:"BookMetadata"`
+			}
+			if json.Unmarshal(raw, &v) != nil || v.BookMetadata.Language == "" {
+				continue
+			}
+			seen++
+			if v.BookMetadata.Language != "sv" {
+				t.Errorf("Language = %q, want %q: the device is handed ISO 639-1, "+
+					"not Calibre's ISO 639-2", v.BookMetadata.Language, "sv")
+			}
+			var formats []string
+			for _, d := range v.BookMetadata.DownloadUrls {
+				formats = append(formats, d.Format)
+			}
+			if len(formats) == 0 {
+				t.Error("entitlement offered no download at all")
+			}
+			for _, name := range formats {
+				if name == "EPUB" && len(formats) < 2 {
+					t.Errorf("EPUB offered as %v; calibre-web also advertises EPUB3", formats)
+				}
+			}
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no entitlements in the sync response")
+	}
+}

@@ -505,7 +505,7 @@ func (h *Handler) metadataFor(r *http.Request, b *syncBook) BookMetadata {
 		ExternalIds:     []string{},
 		Genre:           "00000000-0000-0000-0000-000000000001",
 		IsSocialEnabled: true,
-		Language:        threeLetterLang(b.Language),
+		Language:        koboLanguage(b.Language),
 		RevisionId:      b.UUID,
 		Title:           b.Title,
 		WorkId:          b.UUID,
@@ -542,13 +542,20 @@ func (h *Handler) metadataFor(r *http.Request, b *syncBook) BookMetadata {
 	// format we would have to build on demand is exactly what makes
 	// calibre-web's sync time out.
 	for _, f := range h.formatsFor(r.Context(), b) {
-		md.DownloadUrls = append(md.DownloadUrls, DownloadURL{
-			Format:   f.format,
-			Size:     f.size,
-			Url:      downloadURL(h.externalURL, tok, b.ID, f.format),
-			Platform: "Generic",
-			DrmType:  "None",
-		})
+		// One file can be offered under more than one name. calibre-web
+		// advertises an EPUB as both EPUB3 and EPUB, and matching that matters
+		// for the ~5,000 books here that have no KEPUB sibling: a device that
+		// only accepts EPUB3 would otherwise be offered nothing it recognises.
+		// The URL is keyed on the real format either way.
+		for _, name := range koboFormatNames(f.format) {
+			md.DownloadUrls = append(md.DownloadUrls, DownloadURL{
+				Format:   name,
+				Size:     f.size,
+				Url:      downloadURL(h.externalURL, tok, b.ID, f.format),
+				Platform: "Generic",
+				DrmType:  "None",
+			})
+		}
 	}
 	return md
 }
@@ -666,12 +673,6 @@ func readingStateJSON(s *readingStateRow) ReadingState {
 }
 
 // threeLetterLang maps our stored code to what the device expects.
-func threeLetterLang(code string) string {
-	if code == "" {
-		return "en"
-	}
-	return code
-}
 
 var errNotFound = errors.New("not found")
 
