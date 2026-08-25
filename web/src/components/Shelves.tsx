@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { shelvesApi, type Shelf } from '../api'
+import { koboShelfApi, shelvesApi, type Shelf } from '../api'
 
 /**
  * Shelf management.
@@ -29,6 +29,12 @@ export function Shelves({ onBrowse }: { onBrowse: (shelfId: number) => void }) {
   })
   const patch = useMutation({
     mutationFn: (v: { id: number; patch: Partial<Shelf> }) => shelvesApi.update(v.id, v.patch),
+    onSuccess: refresh,
+    onError: fail,
+  })
+  const subscribe = useMutation({
+    mutationFn: (v: { id: number; on: boolean }) =>
+      v.on ? koboShelfApi.subscribe(v.id) : koboShelfApi.unsubscribe(v.id),
     onSuccess: refresh,
     onError: fail,
   })
@@ -150,6 +156,14 @@ export function Shelves({ onBrowse }: { onBrowse: (shelfId: number) => void }) {
         <>
           <h3 style={{ marginTop: 26 }}>Shared with you</h3>
           <table className="table">
+            <thead>
+              <tr>
+                <th>Shelf</th>
+                <th style={{ width: 80 }}>Books</th>
+                <th style={{ width: 130 }}>Owner</th>
+                <th style={{ width: 170 }}>Sync to my Kobo</th>
+              </tr>
+            </thead>
             <tbody>
               {others.map((s) => (
                 <tr key={s.id}>
@@ -158,12 +172,28 @@ export function Shelves({ onBrowse }: { onBrowse: (shelfId: number) => void }) {
                       {s.name}
                     </button>
                   </td>
-                  <td style={{ width: 80 }}>{s.book_count.toLocaleString('sv-SE')}</td>
+                  <td>{s.book_count.toLocaleString('sv-SE')}</td>
                   <td style={{ color: 'var(--text-muted)' }}>{s.owner}</td>
+                  <td>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={s.kobo_subscribed}
+                        onChange={(e) =>
+                          subscribe.mutate({ id: s.id, on: e.target.checked })
+                        }
+                      />
+                      <span>{s.kobo_subscribed ? 'Syncing' : 'Off'}</span>
+                    </label>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <p className="hint">
+            Subscribing sends a shelf someone else owns to <em>your</em> devices. The
+            owner's own Sync to Kobo setting only affects theirs.
+          </p>
         </>
       )}
     </div>

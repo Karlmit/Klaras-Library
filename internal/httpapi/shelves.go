@@ -22,6 +22,9 @@ type Shelf struct {
 	BookCount int64  `json:"book_count"`
 	Owner     string `json:"owner"`
 	Mine      bool   `json:"mine"`
+	// KoboSubscribed is set on a shelf someone else owns that this user has
+	// chosen to receive on their own device.
+	KoboSubscribed bool `json:"kobo_subscribed"`
 }
 
 func (s *Server) handleListShelves(w http.ResponseWriter, r *http.Request) {
@@ -29,9 +32,12 @@ func (s *Server) handleListShelves(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.Pool.Query(r.Context(), `
 		SELECT sh.id, sh.uuid::text, sh.name, sh.is_public, sh.kobo_sync,
 		       (SELECT count(*) FROM shelf_books sb WHERE sb.shelf_id = sh.id),
-		       us.username, (sh.user_id = $1) AS mine
+		       us.username, (sh.user_id = $1) AS mine,
+		       (sub.user_id IS NOT NULL) AS kobo_subscribed
 		FROM shelves sh
 		JOIN users us ON us.id = sh.user_id
+		LEFT JOIN shelf_kobo_subscriptions sub
+		       ON sub.shelf_id = sh.id AND sub.user_id = $1
 		WHERE sh.user_id = $1 OR sh.is_public
 		ORDER BY mine DESC, sh.position, lower(sh.name)`, u.ID)
 	if err != nil {
@@ -44,7 +50,7 @@ func (s *Server) handleListShelves(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var sh Shelf
 		if err := rows.Scan(&sh.ID, &sh.UUID, &sh.Name, &sh.IsPublic, &sh.KoboSync,
-			&sh.BookCount, &sh.Owner, &sh.Mine); err != nil {
+			&sh.BookCount, &sh.Owner, &sh.Mine, &sh.KoboSubscribed); err != nil {
 			s.fail(w, r, err, "scan shelf")
 			return
 		}
@@ -266,6 +272,67 @@ func (s *Server) handleShelfBooks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "updated", "added": len(in.Add), "removed": len(in.Remove),
 	})
+}
+
+// handleKoboSubscribe opts this user's devices into a shelf someone else owns.
+//
+// Deliberately separate from the owner's kobo_sync flag: that one means "send
+// this to MY devices", so toggling it on someone else's behalf would either do
+// nothing or change what their reader receives. A subscription belongs to the
+// subscriber alone.
+func (s *Server) handleKoboSubscribe(w http.ResponseWriter, r *http.Request) {
+	id, err := intParam(r, "id")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad shelf id")
+		return
+	}
+	u := s.currentUser(r)
+
+	var isPublic, mine bool
+	if err := s.db.Pool.QueryRow(r.Context(),
+		`SELECT is_public, user_id = $2 FROM shelves WHERE id = $1`, id, u.ID).
+		Scan(&isPublic, &mine); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeErr(w, http.StatusNotFound, "no such shelf")
+			return
+		}
+		s.fail(w, r, err, "shelf lookup")
+		return
+	}
+	if mine {
+		writeErr(w, http.StatusBadRequest,
+			"this is your own shelf; use the Sync to Kobo toggle instead")
+		return
+	}
+	if !isPublic {
+		writeErr(w, http.StatusForbidden, "that shelf is not shared with you")
+		return
+	}
+
+	if r.Method == http.MethodDelete {
+		if _, err := s.db.Pool.Exec(r.Context(),
+			`DELETE FROM shelf_kobo_subscriptions WHERE user_id=$1 AND shelf_id=$2`,
+			u.ID, id); err != nil {
+			s.fail(w, r, err, "unsubscribe")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "unsubscribed"})
+		return
+	}
+
+	if _, err := s.db.Pool.Exec(r.Context(),
+		`INSERT INTO shelf_kobo_subscriptions (user_id, shelf_id) VALUES ($1,$2)
+		 ON CONFLICT DO NOTHING`, u.ID, id); err != nil {
+		s.fail(w, r, err, "subscribe")
+		return
+	}
+	// Touch the shelf so the next sync sees it as changed and sends the
+	// collection, rather than waiting for an unrelated edit.
+	if _, err := s.db.Pool.Exec(r.Context(),
+		`UPDATE shelves SET updated_at = now() WHERE id = $1`, id); err != nil {
+		s.log.Warn("could not touch shelf after subscribe", "shelf", id, "err", err)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "subscribed"})
 }
 
 // handleKoboToken issues a sync token for the current user.

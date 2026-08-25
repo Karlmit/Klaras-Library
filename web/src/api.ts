@@ -176,6 +176,7 @@ export interface Shelf {
   book_count: number
   owner: string
   mine: boolean
+  kobo_subscribed: boolean
 }
 
 export interface MetadataResult {
@@ -351,3 +352,18 @@ export const createUser = (
   method: 'POST',
   body: JSON.stringify({ username, email, password, role }),
 })
+
+export const selectionApi = {
+  /** Every book id matching a filter, for "select all". */
+  ids: (qy: BookQuery) =>
+    req<{ ids: number[]; count: number; truncated: boolean; limit: number }>(
+      `/api/books/ids?${bookQueryString(qy)}`,
+    ),
+}
+
+export const koboShelfApi = {
+  subscribe: (shelfId: number) =>
+    req<unknown>(`/api/shelves/${shelfId}/kobo-subscription`, { method: 'POST' }),
+  unsubscribe: (shelfId: number) =>
+    req<unknown>(`/api/shelves/${shelfId}/kobo-subscription`, { method: 'DELETE' }),
+}

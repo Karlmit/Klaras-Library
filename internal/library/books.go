@@ -323,3 +323,80 @@ func gt(desc bool) string {
 	}
 	return ">"
 }
+
+// BookIDs returns the ids matching a filter, for "select all".
+//
+// Only the primary key is read, so even the largest category in this library
+// comes back in a few milliseconds. Reports whether the limit truncated the
+// result, because silently selecting a subset and then acting on it is exactly
+// the kind of surprise a bulk operation must not spring.
+func (s *Store) BookIDs(ctx context.Context, f Filter, limit int) ([]int64, bool, error) {
+	if limit <= 0 {
+		limit = 10000
+	}
+	var (
+		where []string
+		args  []any
+	)
+	push := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+
+	if f.Query != "" {
+		where = append(where, fmt.Sprintf(
+			"b.search_tsv @@ plainto_tsquery('%s', f_unaccent(%s))", searchConfig, push(f.Query)))
+	}
+	if f.Author != "" {
+		where = append(where, "b.author_names @> ARRAY["+push(f.Author)+"]")
+	}
+	if f.Tag != "" {
+		where = append(where, "b.tag_names @> ARRAY["+push(f.Tag)+"]")
+	}
+	if f.Series != "" {
+		where = append(where, "b.series_name = "+push(f.Series))
+	}
+	if f.Language != "" {
+		where = append(where, "b.languages @> ARRAY["+push(f.Language)+"]")
+	}
+	if f.Format != "" {
+		where = append(where, "EXISTS (SELECT 1 FROM book_files bf WHERE bf.book_id=b.id AND bf.format="+
+			push(strings.ToUpper(f.Format))+")")
+	}
+	if f.ShelfID > 0 {
+		where = append(where, "EXISTS (SELECT 1 FROM shelf_books sb WHERE sb.book_id=b.id AND sb.shelf_id="+
+			push(f.ShelfID)+")")
+	}
+	if f.NeedsReview {
+		where = append(where, "b.needs_review")
+	}
+
+	clause := ""
+	if len(where) > 0 {
+		clause = "WHERE " + strings.Join(where, " AND ")
+	}
+	q := fmt.Sprintf("SELECT b.id FROM books b %s ORDER BY b.title_sort, b.id LIMIT %s",
+		clause, push(limit+1))
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("book ids: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]int64, 0, 512)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, false, err
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if len(out) > limit {
+		return out[:limit], true, nil
+	}
+	return out, false, nil
+}

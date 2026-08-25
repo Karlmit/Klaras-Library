@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type BookQuery, type User } from './api'
+import { api, selectionApi, type BookQuery, type User } from './api'
 import { AuthScreen, ForcePasswordChange } from './components/Auth'
 import { BulkBar } from './components/BulkBar'
 import { EditPanel } from './components/EditPanel'
@@ -15,6 +15,7 @@ import { BookGrid } from './components/BookGrid'
 import { BookDetail } from './components/BookDetail'
 import { Settings } from './components/Settings'
 import { Upload } from './components/Upload'
+import { useOverlayHistory } from './useOverlayHistory'
 
 const SORTS: { value: string; label: string }[] = [
   { value: 'title', label: 'Title A–Ö' },
@@ -38,6 +39,18 @@ export function App() {
   const [count, setCount] = useState<number | undefined>()
   const [query, setQuery] = useState<BookQuery>({ sort: 'title' })
   const [searchInput, setSearchInput] = useState('')
+
+  // Back closes whatever is open instead of leaving the site.
+  const closeSettings = useCallback(() => setSettingsOpen(false), [])
+  const closeDetail = useCallback(() => setSelected(null), [])
+  const closeEdit = useCallback(() => setEditing(null), [])
+  const closeReader = useCallback(() => setReading(null), [])
+  const closeUpload = useCallback(() => setUploadOpen(false), [])
+  useOverlayHistory(settingsOpen, closeSettings, 'settings')
+  useOverlayHistory(selected != null, closeDetail, 'book')
+  useOverlayHistory(editing != null, closeEdit, 'edit')
+  useOverlayHistory(reading != null, closeReader, 'reader')
+  useOverlayHistory(uploadOpen, closeUpload, 'upload')
 
   const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ['status'],
@@ -104,6 +117,30 @@ export function App() {
     [lastPicked],
   )
 
+  const [selectingAll, setSelectingAll] = useState(false)
+
+  // Selecting everything that matches the current filter, not just what has
+  // been scrolled into view. Without this, fixing 6,706 books tagged "F" would
+  // mean scrolling the whole way and shift-clicking.
+  const selectAll = useCallback(async () => {
+    setSelectingAll(true)
+    try {
+      const r = await selectionApi.ids(query)
+      setPicked(new Set(r.ids))
+      if (r.truncated) {
+        alert(
+          `This filter matches more than ${r.limit.toLocaleString('sv-SE')} books. ` +
+            `The first ${r.count.toLocaleString('sv-SE')} are selected; ` +
+            `narrow the filter to reach the rest.`,
+        )
+      }
+    } catch (e) {
+      alert(`Could not select everything: ${(e as Error).message}`)
+    } finally {
+      setSelectingAll(false)
+    }
+  }, [query])
+
   const clearPicked = useCallback(() => {
     setPicked(new Set())
     setLastPicked(null)
@@ -144,7 +181,7 @@ export function App() {
     return (
       <Settings
         user={user}
-        onClose={() => setSettingsOpen(false)}
+        onClose={closeSettings}
         onBrowseShelf={(id) => patchQuery({ shelf: id })}
       />
     )
@@ -220,6 +257,14 @@ export function App() {
             </span>
           ))}
           <div className="topbar__spacer" />
+          <button
+            className="btn btn--sm btn--ghost"
+            onClick={() => void selectAll()}
+            disabled={selectingAll}
+            title="Select every book matching the current filter"
+          >
+            {selectingAll ? 'Selecting…' : 'Select all'}
+          </button>
           {user.role !== 'reader' && (
             <button className="btn btn--sm" onClick={() => setUploadOpen(true)}>
               Add books
@@ -252,7 +297,7 @@ export function App() {
       {selected != null && (
         <BookDetail
           bookId={selected}
-          onClose={() => setSelected(null)}
+          onClose={closeDetail}
           onFilter={(patch) => patchQuery(patch)}
           onEdit={(id) => {
             setSelected(null)
@@ -266,9 +311,9 @@ export function App() {
         />
       )}
 
-      {editing != null && <EditPanel bookId={editing} onClose={() => setEditing(null)} />}
+      {editing != null && <EditPanel bookId={editing} onClose={closeEdit} />}
 
-      {uploadOpen && <Upload onClose={() => setUploadOpen(false)} />}
+      {uploadOpen && <Upload onClose={closeUpload} />}
 
       {reading && (
         <Suspense fallback={<div className="reader"><div className="reader__status">Loading reader…</div></div>}>
@@ -276,7 +321,7 @@ export function App() {
             bookId={reading.id}
             title={reading.title}
             format={reading.format}
-            onClose={() => setReading(null)}
+            onClose={closeReader}
           />
         </Suspense>
       )}

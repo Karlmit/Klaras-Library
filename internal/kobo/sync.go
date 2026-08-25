@@ -51,11 +51,19 @@ func NewEngine(pool *pgxpool.Pool) *Engine { return &Engine{pool: pool} }
 // the size of the library.
 func (e *Engine) changedBooks(ctx context.Context, userID int64, since time.Time, limit int) ([]syncBook, bool, error) {
 	rows, err := e.pool.Query(ctx, `
-		WITH synced AS (
+		WITH my_shelves AS (
+			-- Shelves I own and have marked for sync, plus public shelves
+			-- someone else owns that I have subscribed to.
+			SELECT s.id FROM shelves s
+			WHERE s.user_id = $1 AND s.kobo_sync
+			UNION
+			SELECT s.id FROM shelves s
+			JOIN shelf_kobo_subscriptions sub ON sub.shelf_id = s.id
+			WHERE sub.user_id = $1 AND s.is_public
+		), synced AS (
 			SELECT sb.book_id, min(sb.added_at) AS added_at
 			FROM shelf_books sb
-			JOIN shelves s ON s.id = sb.shelf_id
-			WHERE s.user_id = $1 AND s.kobo_sync
+			JOIN my_shelves ms ON ms.id = sb.shelf_id
 			GROUP BY sb.book_id
 		)
 		SELECT b.id, b.uuid::text, b.title, b.author_names, b.series_name, b.series_index,
@@ -113,7 +121,11 @@ func (e *Engine) removedBooks(ctx context.Context, userID int64, since time.Time
 		  AND NOT EXISTS (
 			SELECT 1 FROM shelf_books sb
 			JOIN shelves s ON s.id = sb.shelf_id
-			WHERE sb.book_id = ks.book_id AND s.user_id = $1 AND s.kobo_sync)
+			LEFT JOIN shelf_kobo_subscriptions sub
+			       ON sub.shelf_id = s.id AND sub.user_id = $1
+			WHERE sb.book_id = ks.book_id
+			  AND ((s.user_id = $1 AND s.kobo_sync)
+			    OR (s.is_public AND sub.user_id IS NOT NULL)))
 		ORDER BY ks.last_synced_at
 		LIMIT $2`, userID, limit)
 	if err != nil {
@@ -173,7 +185,11 @@ func (e *Engine) changedShelves(ctx context.Context, userID int64, since time.Ti
 		SELECT s.id, s.uuid::text, s.name, s.created_at, s.updated_at,
 		       (s.created_at > $2) AS is_new
 		FROM shelves s
-		WHERE s.user_id = $1 AND s.kobo_sync AND s.updated_at > $2
+		LEFT JOIN shelf_kobo_subscriptions sub
+		       ON sub.shelf_id = s.id AND sub.user_id = $1
+		WHERE ((s.user_id = $1 AND s.kobo_sync)
+		    OR (s.is_public AND sub.user_id IS NOT NULL))
+		  AND s.updated_at > $2
 		ORDER BY s.updated_at, s.id`, userID, since)
 	if err != nil {
 		return nil, err
@@ -271,7 +287,11 @@ func (e *Engine) changedReadingStates(ctx context.Context, userID int64, since t
 		  AND EXISTS (
 			SELECT 1 FROM shelf_books sb
 			JOIN shelves s ON s.id = sb.shelf_id
-			WHERE sb.book_id = rs.book_id AND s.user_id = $1 AND s.kobo_sync)
+			LEFT JOIN shelf_kobo_subscriptions sub
+			       ON sub.shelf_id = s.id AND sub.user_id = $1
+			WHERE sb.book_id = rs.book_id
+			  AND ((s.user_id = $1 AND s.kobo_sync)
+			    OR (s.is_public AND sub.user_id IS NOT NULL)))
 		ORDER BY rs.last_modified, rs.book_id
 		LIMIT $3`, userID, since, limit+1)
 	if err != nil {
