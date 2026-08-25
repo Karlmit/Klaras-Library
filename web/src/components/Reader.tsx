@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import ePub, { type Rendition } from 'epubjs'
-import { downloadUrl } from '../api'
+import { booksApi, downloadUrl } from '../api'
 
 interface Props {
   bookId: number
@@ -20,6 +20,7 @@ interface Props {
 export function Reader({ bookId, title, format, onClose }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const renditionRef = useRef<Rendition | null>(null)
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const storageKey = `klaras:reader:${bookId}`
@@ -67,20 +68,49 @@ export function Reader({ bookId, title, format, onClose }: Props) {
         rendition = book.renderTo(host, { width: '100%', height: '100%', spread: 'auto' })
         renditionRef.current = rendition
 
+        // The server is the source of truth so a book resumes on any device;
+        // localStorage is the fallback when the request fails or is slow.
         let saved: string | null = null
         try {
-          saved = localStorage.getItem(storageKey)
+          const p = await booksApi.progress(bookId)
+          saved = p.location ?? null
         } catch {
-          // Private browsing, or storage disabled. Start from the beginning.
+          // Offline or unauthorised: fall back to this browser's own memory.
+        }
+        if (!saved) {
+          try {
+            saved = localStorage.getItem(storageKey)
+          } catch {
+            // Private browsing, or storage disabled. Start from the beginning.
+          }
         }
 
-        rendition.on('relocated', (location: { start: { cfi: string } }) => {
-          try {
-            localStorage.setItem(storageKey, location.start.cfi)
-          } catch {
-            // The reader still works; it just will not resume next time.
-          }
-        })
+        rendition.on(
+          'relocated',
+          (location: { start: { cfi: string; percentage?: number } }) => {
+            const cfi = location.start.cfi
+            try {
+              localStorage.setItem(storageKey, cfi)
+            } catch {
+              // The reader still works; it just will not resume next time.
+            }
+            // Debounced: page turns are frequent and a write per turn would be
+            // a request per turn.
+            if (saveTimer.current) clearTimeout(saveTimer.current)
+            saveTimer.current = setTimeout(() => {
+              const pct = location.start.percentage
+              void booksApi
+                .saveProgress(bookId, {
+                  status: pct != null && pct >= 0.99 ? 'Finished' : 'Reading',
+                  percent: pct != null ? Math.round(pct * 100) : undefined,
+                  location: cfi,
+                })
+                .catch(() => {
+                  // Progress is a convenience; never interrupt reading for it.
+                })
+            }, 1500)
+          },
+        )
         rendition.on('keyup', onKey)
 
         await rendition.display(saved ?? undefined)
@@ -95,6 +125,7 @@ export function Reader({ bookId, title, format, onClose }: Props) {
 
     return () => {
       cancelled = true
+      if (saveTimer.current) clearTimeout(saveTimer.current)
       window.removeEventListener('keydown', onKey)
       rendition?.destroy()
       book?.destroy()

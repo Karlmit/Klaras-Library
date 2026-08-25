@@ -16,6 +16,7 @@ import (
 	"github.com/Karlmit/Klaras-Library/internal/config"
 	"github.com/Karlmit/Klaras-Library/internal/covers"
 	"github.com/Karlmit/Klaras-Library/internal/filestore"
+	"github.com/Karlmit/Klaras-Library/internal/ingest"
 	"github.com/Karlmit/Klaras-Library/internal/jobs"
 	"github.com/Karlmit/Klaras-Library/internal/kepub"
 	"github.com/Karlmit/Klaras-Library/internal/kobo"
@@ -35,6 +36,7 @@ type Server struct {
 	covers    *covers.Service
 	kepub     *kepub.Service
 	files     *filestore.Store
+	ingest    *ingest.Service
 	providers *provider.Set
 	limiter   *auth.Limiter
 	queue     *jobs.Queue
@@ -54,6 +56,7 @@ type Deps struct {
 	Covers    *covers.Service
 	Kepub     *kepub.Service
 	Files     *filestore.Store
+	Ingest    *ingest.Service
 	Providers *provider.Set
 	Queue     *jobs.Queue
 	Log       *slog.Logger
@@ -82,7 +85,7 @@ func New(d Deps) *Server {
 		limiter: auth.NewLimiter(8, 15*time.Minute, 15*time.Minute),
 
 		cfg: d.Config, db: d.DB, lib: d.Library, auth: d.Auth,
-		covers: d.Covers, kepub: d.Kepub, files: d.Files,
+		covers: d.Covers, kepub: d.Kepub, files: d.Files, ingest: d.Ingest,
 		providers: d.Providers, queue: d.Queue, sessions: sm,
 		log: d.Log, version: d.Version, started: time.Now(),
 	}
@@ -152,6 +155,8 @@ func (s *Server) routes() {
 				r.Post("/shelves/{id}/books", s.handleShelfBooks)
 				r.Get("/kobo/tokens", s.handleListKoboTokens)
 				r.Post("/kobo/tokens", s.handleKoboToken)
+				r.Get("/books/{id}/progress", s.handleGetProgress)
+				r.Put("/books/{id}/progress", s.handlePutProgress)
 				r.Get("/books/{id}/download/{format}", s.handleDownloadBook)
 			})
 
@@ -163,12 +168,15 @@ func (s *Server) routes() {
 				r.Get("/metadata/search", s.handleMetadataSearch)
 				r.Delete("/books/{id}", s.handleDeleteBook)
 				r.Post("/books/bulk-delete", s.handleBulkDelete)
+				r.Post("/books/upload", s.handleUploadBook)
+				r.Put("/books/{id}/cover", s.handleReplaceCover)
 			})
 
 			// Account administration.
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireRole(auth.RoleAdmin))
 				r.Get("/users", s.handleListUsers)
+				r.Post("/users", s.handleCreateUser)
 				r.Patch("/users/{id}", s.handleUpdateUser)
 				r.Put("/users/{id}/password", s.handleSetUserPassword)
 			})

@@ -14,6 +14,7 @@ import { Sidebar } from './components/Sidebar'
 import { BookGrid } from './components/BookGrid'
 import { BookDetail } from './components/BookDetail'
 import { Settings } from './components/Settings'
+import { Upload } from './components/Upload'
 
 const SORTS: { value: string; label: string }[] = [
   { value: 'title', label: 'Title A–Ö' },
@@ -32,6 +33,7 @@ export function App() {
   const [reading, setReading] = useState<{ id: number; title: string; format: string } | null>(null)
   const [picked, setPicked] = useState<Set<number>>(new Set())
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
   const [lastPicked, setLastPicked] = useState<number | null>(null)
   const [count, setCount] = useState<number | undefined>()
   const [query, setQuery] = useState<BookQuery>({ sort: 'title' })
@@ -218,6 +220,11 @@ export function App() {
             </span>
           ))}
           <div className="topbar__spacer" />
+          {user.role !== 'reader' && (
+            <button className="btn btn--sm" onClick={() => setUploadOpen(true)}>
+              Add books
+            </button>
+          )}
           <label className="visually-hidden" htmlFor="sort">Sort by</label>
           <select
             id="sort"
@@ -260,6 +267,8 @@ export function App() {
       )}
 
       {editing != null && <EditPanel bookId={editing} onClose={() => setEditing(null)} />}
+
+      {uploadOpen && <Upload onClose={() => setUploadOpen(false)} />}
 
       {reading && (
         <Suspense fallback={<div className="reader"><div className="reader__status">Loading reader…</div></div>}>

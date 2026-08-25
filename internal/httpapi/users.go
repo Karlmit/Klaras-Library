@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Karlmit/Klaras-Library/internal/auth"
@@ -55,6 +57,55 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"users": out})
+}
+
+// handleCreateUser adds an account.
+//
+// There is no self-registration: a library is a household, not a service, so
+// accounts are made by an administrator who already has one.
+func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Username string `json:"username"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "malformed request")
+		return
+	}
+	in.Username = strings.TrimSpace(in.Username)
+	if in.Username == "" {
+		writeErr(w, http.StatusBadRequest, "a username is required")
+		return
+	}
+	if in.Role == "" {
+		in.Role = auth.RoleReader
+	}
+	switch in.Role {
+	case auth.RoleAdmin, auth.RoleEditor, auth.RoleReader:
+	default:
+		writeErr(w, http.StatusBadRequest, "unknown role")
+		return
+	}
+
+	u, err := s.auth.CreateUser(r.Context(), in.Username, in.Email, in.Password, in.Role)
+	if err != nil {
+		switch {
+		case errors.Is(err, auth.ErrPasswordTooShort):
+			writeErr(w, http.StatusBadRequest, err.Error())
+		case strings.Contains(err.Error(), "users_username_key"):
+			writeErr(w, http.StatusConflict, "that username is taken")
+		case strings.Contains(err.Error(), "users_email_key"):
+			writeErr(w, http.StatusConflict, "that email is already used by another account")
+		default:
+			s.fail(w, r, err, "create user")
+		}
+		return
+	}
+	s.log.Info("user created", "username", u.Username, "role", u.Role,
+		"by", s.currentUser(r).Username)
+	writeJSON(w, http.StatusCreated, u)
 }
 
 // handleSetUserPassword lets an admin set someone else's password.

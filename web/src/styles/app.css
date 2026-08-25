@@ -631,3 +631,30 @@ select.sort {
 }
 .shelfpick__item:hover { background: var(--accent-subtle); border-color: var(--v-300); }
 .shelfpick__item .sub { margin-left: auto; color: var(--text-muted); font-size: 12px; }
+
+/* ---- upload --------------------------------------------------------------*/
+.dropzone {
+    border: 2px dashed var(--v-300);
+    border-radius: var(--radius-md);
+    background: var(--v-50);
+    padding: 32px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+}
+.dropzone:hover, .dropzone--over {
+    background: var(--accent-subtle);
+    border-color: var(--accent);
+}
+.dropzone p { margin: 6px 0 0; }
+
+.pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.pill--imported  { background: #DCFCE7; color: #14532D; }
+.pill--duplicate { background: var(--v-100); color: var(--v-800); }
+.pill--failed    { background: #FEE2E2; color: #991B1B; }

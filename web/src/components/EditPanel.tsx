@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, editApi, type Book, type BookEdit, type MetadataResult } from '../api'
+import { api, booksApi, coverUrl, editApi, type Book, type BookEdit, type MetadataResult } from '../api'
 
 interface Props {
   bookId: number
@@ -65,6 +65,8 @@ export function EditPanel({ bookId, onClose }: Props) {
         <h2 style={{ marginTop: 0 }}>Edit metadata</h2>
 
         {error && <div className="error">{error}</div>}
+
+        <CoverSwap bookId={bookId} />
 
         <button className="btn btn--ghost btn--sm" onClick={() => setLookupOpen((v) => !v)}>
           {lookupOpen ? 'Hide lookup' : 'Look up online…'}
@@ -199,6 +201,49 @@ export function EditPanel({ bookId, onClose }: Props) {
         </form>
       </aside>
     </>
+  )
+}
+
+function CoverSwap({ bookId }: { bookId: number }) {
+  const qc = useQueryClient()
+  const [error, setError] = useState('')
+  const [bust, setBust] = useState(0)
+
+  const swap = useMutation({
+    mutationFn: (f: File) => booksApi.replaceCover(bookId, f),
+    onSuccess: () => {
+      setError('')
+      // The URL is unchanged, so the browser would keep the old image; a
+      // cache-busting parameter is the cheapest way to show the new one.
+      setBust(Date.now())
+      void qc.invalidateQueries({ queryKey: ['books'] })
+    },
+    onError: (e) => setError((e as Error).message),
+  })
+
+  return (
+    <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 14 }}>
+      <img
+        src={`${coverUrl(bookId, 'grid')}${bust ? `?v=${bust}` : ''}`}
+        alt=""
+        style={{ width: 56, borderRadius: 4, boxShadow: 'var(--shadow-cover)' }}
+      />
+      <div>
+        <label className="btn btn--ghost btn--sm" style={{ cursor: 'pointer' }}>
+          {swap.isPending ? 'Uploading…' : 'Replace cover'}
+          <input
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) swap.mutate(f)
+            }}
+          />
+        </label>
+        {error && <div className="warn" style={{ marginTop: 4 }}>{error}</div>}
+      </div>
+    </div>
   )
 }
 

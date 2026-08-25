@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { usersApi, type UserSummary } from '../api'
+import { createUser, usersApi, type UserSummary } from '../api'
 
 const ROLES = [
   { value: 'reader', label: 'Reader', hint: 'browse, read and download' },
@@ -12,6 +12,7 @@ export function SettingsUsers({ me }: { me: { id: number } }) {
   const qc = useQueryClient()
   const { data, isLoading } = useQuery({ queryKey: ['users'], queryFn: usersApi.list })
   const [pwFor, setPwFor] = useState<UserSummary | null>(null)
+  const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
 
   const refresh = () => void qc.invalidateQueries({ queryKey: ['users'] })
@@ -41,6 +42,10 @@ export function SettingsUsers({ me }: { me: { id: number } }) {
           </p>
         </div>
       )}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <button className="btn" onClick={() => setAdding(true)}>Add user</button>
+      </div>
 
       <table className="table">
         <thead>
@@ -98,6 +103,13 @@ export function SettingsUsers({ me }: { me: { id: number } }) {
         </tbody>
       </table>
 
+      {adding && (
+        <NewUserDialog
+          onClose={() => setAdding(false)}
+          onDone={() => { setAdding(false); refresh() }}
+        />
+      )}
+
       {pwFor && (
         <PasswordDialog
           user={pwFor}
@@ -106,6 +118,63 @@ export function SettingsUsers({ me }: { me: { id: number } }) {
         />
       )}
     </div>
+  )
+}
+
+function NewUserDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [username, setUsername] = useState('')
+  const [email, setEmail] = useState('')
+  const [pw, setPw] = useState('')
+  const [role, setRole] = useState('reader')
+  const [error, setError] = useState('')
+
+  const create = useMutation({
+    mutationFn: () => createUser(username.trim(), email.trim(), pw, role),
+    onSuccess: onDone,
+    onError: (e) => setError((e as Error).message),
+  })
+
+  return (
+    <>
+      <div className="drawer-backdrop" onClick={onClose} />
+      <div className="dialog" role="dialog" aria-modal="true" aria-label="Add a user">
+        <h3 style={{ marginTop: 0 }}>Add a user</h3>
+        {error && <div className="error">{error}</div>}
+        <form onSubmit={(e) => { e.preventDefault(); create.mutate() }}>
+          <div className="field">
+            <label htmlFor="nu">Username</label>
+            <input id="nu" value={username} onChange={(e) => setUsername(e.target.value)}
+                   autoFocus autoComplete="off" required />
+          </div>
+          <div className="field">
+            <label htmlFor="ne">Email (optional)</label>
+            <input id="ne" type="email" value={email}
+                   onChange={(e) => setEmail(e.target.value)} autoComplete="off" />
+          </div>
+          <div className="field">
+            <label htmlFor="nr">Role</label>
+            <select id="nr" className="sort" style={{ width: '100%', height: 36 }}
+                    value={role} onChange={(e) => setRole(e.target.value)}>
+              {ROLES.map((r) => (
+                <option key={r.value} value={r.value}>{r.label} — {r.hint}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="nup">Password (at least 10 characters)</label>
+            <input id="nup" type="password" value={pw}
+                   onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" type="submit"
+                    disabled={!username.trim() || pw.length < 10 || create.isPending}>
+              {create.isPending ? 'Creating…' : 'Create user'}
+            </button>
+            <button className="btn btn--ghost" type="button" onClick={onClose}>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </>
   )
 }
 

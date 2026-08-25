@@ -150,6 +150,54 @@ func (s *Service) writeThumb(img image.Image, uuid string, size Size) error {
 	return os.Rename(tmp.Name(), out)
 }
 
+// WriteSource replaces a book's cover.jpg from an uploaded image.
+//
+// The image is decoded and re-encoded rather than stored as sent: it accepts
+// PNG and WebP as readily as JPEG, and a file that is not really an image
+// fails here rather than in every thumbnail worker afterwards. Written to a
+// temporary file and renamed, so a reader never sees a half-written cover.
+func WriteSource(bookDir string, r io.Reader) error {
+	img, err := imaging.Decode(io.LimitReader(r, 64<<20), imaging.AutoOrientation(true))
+	if err != nil {
+		return fmt.Errorf("not a readable image: %w", err)
+	}
+	// A cover far larger than the biggest thumbnail is wasted disk; 1400px
+	// still comfortably exceeds every size generated from it.
+	if b := img.Bounds(); b.Dx() > 1400 {
+		img = imaging.Resize(img, 1400, 0, imaging.Lanczos)
+	}
+
+	if err := os.MkdirAll(bookDir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(bookDir, ".cover-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+
+	if err := imaging.Encode(tmp, img, imaging.JPEG, imaging.JPEGQuality(88)); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), filepath.Join(bookDir, "cover.jpg"))
+}
+
+// Invalidate removes every cached thumbnail for a book, so a replaced cover is
+// not served from cache until something else happens to evict it.
+func (s *Service) Invalidate(uuid string) {
+	for _, size := range Sizes {
+		_ = os.Remove(s.thumbPath(uuid, size.Name))
+	}
+}
+
 // ThumbnailPayload is the job payload for cover generation.
 type ThumbnailPayload struct {
 	BookID int64  `json:"book_id"`

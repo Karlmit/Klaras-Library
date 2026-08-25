@@ -296,3 +296,58 @@ export const deleteApi = {
       body: JSON.stringify({ ids, keep_files: keepFiles }),
     }),
 }
+
+export interface UploadResult {
+  filename: string
+  book_id?: number
+  status: 'imported' | 'duplicate' | 'failed'
+  error?: string
+}
+
+export interface ReadingProgress {
+  status: 'ReadyToRead' | 'Reading' | 'Finished'
+  percent?: number
+  location?: string
+}
+
+/** Multipart uploads must not carry a JSON Content-Type; the browser sets the boundary. */
+async function upload<T>(path: string, form: FormData, method = 'POST'): Promise<T> {
+  const res = await fetch(path, { method, body: form })
+  if (!res.ok) {
+    let msg = res.statusText
+    try {
+      const b = (await res.json()) as { error?: string }
+      if (b.error) msg = b.error
+    } catch {
+      // non-JSON body; the status text will do
+    }
+    throw new ApiError(res.status, msg)
+  }
+  return (await res.json()) as T
+}
+
+export const booksApi = {
+  upload: (files: File[]) => {
+    const form = new FormData()
+    for (const f of files) form.append('file', f)
+    return upload<{ results: UploadResult[] }>('/api/books/upload', form)
+  },
+
+  replaceCover: (id: number, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return upload<{ status: string }>(`/api/books/${id}/cover`, form, 'PUT')
+  },
+
+  progress: (id: number) => req<ReadingProgress>(`/api/books/${id}/progress`),
+
+  saveProgress: (id: number, p: ReadingProgress) =>
+    req<unknown>(`/api/books/${id}/progress`, { method: 'PUT', body: JSON.stringify(p) }),
+}
+
+export const createUser = (
+  username: string, email: string, password: string, role: string,
+) => req<User>('/api/users', {
+  method: 'POST',
+  body: JSON.stringify({ username, email, password, role }),
+})

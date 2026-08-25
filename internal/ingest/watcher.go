@@ -28,6 +28,14 @@ var supportedFormats = map[string]string{
 	".mobi": "MOBI", ".azw3": "AZW3", ".cbz": "CBZ",
 }
 
+// SupportedFormat reports whether an extension can be ingested. Shared with
+// the upload endpoint so the two entry points can never diverge on what they
+// accept.
+func SupportedFormat(ext string) bool {
+	_, ok := supportedFormats[strings.ToLower(ext)]
+	return ok
+}
+
 // Service imports files dropped into the ingest directory.
 type Service struct {
 	dir    string

@@ -175,9 +175,11 @@ func cmdServe() error {
 		log.Warn("initial facet refresh failed", "err", err)
 	}
 
+	ingestSvc := ingest.New(cfg.IngestDir, db.Pool, files, coverSvc, queue, log)
+
 	srvHandler := httpapi.New(httpapi.Deps{
 		Config: cfg, DB: db, Library: lib, Auth: authSvc,
-		Covers: coverSvc, Kepub: kepubSvc, Files: files,
+		Covers: coverSvc, Kepub: kepubSvc, Files: files, Ingest: ingestSvc,
 		Providers: provider.NewSet("swe"),
 		Queue:     queue, Log: log, Version: version,
 	})
@@ -201,8 +203,7 @@ func cmdServe() error {
 	// Watch folder. The periodic sweep is the reliable half: inotify does not
 	// fire for files written to an Unraid share by another machine.
 	if cfg.IngestDir != "" {
-		go ingest.New(cfg.IngestDir, db.Pool, files, coverSvc, queue, log).
-			Run(ctx, 60*time.Second)
+		go ingestSvc.Run(ctx, 60*time.Second)
 	}
 	go lib.RunFacetRefresher(ctx, 30*time.Second, log)
 
