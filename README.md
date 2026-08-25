@@ -91,6 +91,13 @@ services:
       - /mnt/user/appdata/calibre-web:/calibre-web:ro
       # Cover thumbnails and converted KEPUBs. About 170 kB per book, so ~5 GB
       # for 28,000 books. Safe to delete; it regenerates.
+      #
+      # Create it before the first start, or Docker will make it owned by root
+      # and the container cannot write to it:
+      #     mkdir -p /mnt/user/appdata/klaras-library/cache
+      #     chown -R 99:100 /mnt/user/appdata/klaras-library/cache
+      # Chown that path only. The postgres directory below belongs to uid 70
+      # and Postgres will not start if it is changed.
       - /mnt/user/appdata/klaras-library/cache:/cache
     ports:
       # 8083 is usually already taken by calibre-web, so the host side is 8084.
@@ -114,6 +121,9 @@ services:
       # created, so choose it before the first start.
       - POSTGRES_INITDB_ARGS=--locale-provider=icu --icu-locale=sv-SE --encoding=UTF8
     volumes:
+      # Owned by uid 70 (the postgres user in the alpine image). Never chown
+      # this to 99:100 -- Postgres refuses to start on a data directory it does
+      # not own, with "could not open file global/pg_filenode.map".
       - /mnt/user/appdata/klaras-library/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U klaras -d klaras"]
@@ -132,7 +142,28 @@ The four things to change:
 | `/mnt/user/books/library` | your library folder |
 | `TZ` | your timezone |
 
-Two Unraid details worth not skipping:
+### Create the cache directory first
+
+Docker creates a missing bind-mount directory owned by **root**, which the
+container (running as `99:100`) cannot write to. Every cover then silently
+falls back to a placeholder.
+
+```bash
+mkdir -p /mnt/user/appdata/klaras-library/cache
+chown -R 99:100 /mnt/user/appdata/klaras-library/cache
+```
+
+**Chown that path only.** Do not chown the parent `klaras-library` folder: it
+also holds the Postgres data directory, which belongs to **uid 70** in the
+alpine image. Changing it makes Postgres refuse to start with
+`could not open file "global/pg_filenode.map": Permission denied`. If that has
+already happened, the data is fine and the fix is:
+
+```bash
+chown -R 70:70 /mnt/user/appdata/klaras-library/postgres
+```
+
+Two more Unraid details worth not skipping:
 
 - **`user: "99:100"`** is required. Without it the container runs as uid 1000
   and cannot write to your shares, so ingest, cover generation and reorganize

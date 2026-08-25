@@ -104,8 +104,11 @@ func (c *Config) LogPreflight(log *slog.Logger) bool {
 			"The container runs as the uid from the compose 'user:' setting (99:100 on Unraid).",
 			"Docker creates a missing bind-mount directory owned by root, which that uid cannot write.",
 			"Fix it on the host and restart the container:",
-			"    mkdir -p /mnt/user/appdata/klaras-library/cache",
-			"    chown -R 99:100 /mnt/user/appdata/klaras-library",
+			"    mkdir -p " + c.CacheDir,
+			"    chown -R 99:100 " + c.CacheDir,
+			"Change ONLY the directories listed above. In particular do not chown the",
+			"parent appdata folder: that would also change the Postgres data directory,",
+			"which must stay owned by uid 70, and Postgres refuses to start without it.",
 		} {
 			log.Error(line)
 		}
