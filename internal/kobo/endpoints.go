@@ -359,6 +359,10 @@ func (h *Handler) handleInitialization(w http.ResponseWriter, r *http.Request) {
 			"device's resource table, so covers will not come from this library")
 	}
 
+	// calibre-web sends this alongside the resource table and the device has
+	// only ever been seen to work with it present. "e30=" is base64 "{}": an
+	// empty API token, which is what a self-hosted library legitimately has.
+	setKoboHeader(w.Header(), "x-kobo-apitoken", "e30=")
 	writeJSON(w, http.StatusOK, map[string]any{"Resources": res})
 }
 

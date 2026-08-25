@@ -46,11 +46,11 @@ export function App() {
   const closeEdit = useCallback(() => setEditing(null), [])
   const closeReader = useCallback(() => setReading(null), [])
   const closeUpload = useCallback(() => setUploadOpen(false), [])
-  useOverlayHistory(settingsOpen, closeSettings, 'settings')
-  useOverlayHistory(selected != null, closeDetail, 'book')
-  useOverlayHistory(editing != null, closeEdit, 'edit')
-  useOverlayHistory(reading != null, closeReader, 'reader')
-  useOverlayHistory(uploadOpen, closeUpload, 'upload')
+  useOverlayHistory(settingsOpen, closeSettings)
+  useOverlayHistory(selected != null, closeDetail)
+  useOverlayHistory(editing != null, closeEdit)
+  useOverlayHistory(reading != null, closeReader)
+  useOverlayHistory(uploadOpen, closeUpload)
 
   const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ['status'],

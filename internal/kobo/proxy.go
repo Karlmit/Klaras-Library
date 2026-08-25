@@ -29,6 +29,15 @@ var hopByHopHeaders = []string{
 func (h *Handler) proxyToKoboStore(w http.ResponseWriter, r *http.Request) {
 	// Strip the /kobo/{token} prefix so the store sees the path it expects, and
 	// never forward our own auth token upstream.
+	//
+	// GET is redirected rather than fetched. calibre-web does the same, and the
+	// difference matters: fetching means the store sees OUR request, without the
+	// device's own Kobo credentials, so account endpoints come back
+	// unauthenticated and the device is told it has no profile, no subscriptions
+	// and no benefits right before it starts a sync. A 307 lets the device talk
+	// to Kobo itself, as it did before its library moved here, and keeps its
+	// session where the device can actually use it. Writes are still forwarded:
+	// a redirected POST would have to replay a body we have already consumed.
 	path := r.URL.Path
 	if i := strings.Index(path, "/v1/"); i >= 0 {
 		path = path[i:]
@@ -43,6 +52,11 @@ func (h *Handler) proxyToKoboStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target.RawQuery = r.URL.RawQuery
+
+	if r.Method == http.MethodGet {
+		http.Redirect(w, r, target.String(), http.StatusTemporaryRedirect)
+		return
+	}
 
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(),
 		io.LimitReader(r.Body, 4<<20))

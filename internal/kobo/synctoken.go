@@ -102,6 +102,33 @@ func SyncTokenFromRequest(r *http.Request) *SyncToken {
 	}
 }
 
+// setKoboHeader writes a response header under a lowercase name.
+//
+// http.Header.Set would canonicalise "x-kobo-synctoken" to
+// "X-Kobo-Synctoken". HTTP header names are case-insensitive and any correct
+// client treats the two as identical, but calibre-web sends them lowercase and
+// the Kobo firmware is the one client here that cannot be inspected or fixed.
+// Writing into the map directly keeps the name exactly as Go will put it on the
+// wire, so our responses match the server the device is known to work with.
+// Nothing reads these back on the response side; use r.Header.Get for requests.
+func setKoboHeader(h http.Header, name, value string) {
+	delete(h, http.CanonicalHeaderKey(name))
+	h[name] = []string{value}
+}
+
+// koboHeaderValue reads back a header set by setKoboHeader.
+//
+// http.Header.Get canonicalises its argument, so it cannot see a key written
+// into the map verbatim. Anything reading one of these off a RESPONSE must go
+// through here; request headers are canonicalised by net/http on parse and are
+// safe with the ordinary Get.
+func koboHeaderValue(h http.Header, name string) string {
+	if v := h[name]; len(v) > 0 {
+		return v[0]
+	}
+	return h.Get(name)
+}
+
 // WriteHeader serialises the token onto a response.
 func (t *SyncToken) WriteHeader(h http.Header) {
 	var w wire
@@ -117,7 +144,7 @@ func (t *SyncToken) WriteHeader(h http.Header) {
 	if err != nil {
 		return
 	}
-	h.Set(SyncTokenHeader, base64.StdEncoding.EncodeToString(b))
+	setKoboHeader(h, SyncTokenHeader, base64.StdEncoding.EncodeToString(b))
 }
 
 // toEpoch converts to fractional epoch seconds.

@@ -124,10 +124,10 @@ func (s *storeSyncResult) apply(items []any, tok *SyncToken, h http.Header, limi
 		tok.RawKoboStoreToken = s.StoreToken
 	}
 	if s.RecentReads != "" {
-		h.Set("x-kobo-recent-reads", s.RecentReads)
+		setKoboHeader(h, "x-kobo-recent-reads", s.RecentReads)
 	}
 	if s.SyncMode != "" {
-		h.Set("x-kobo-sync-mode", s.SyncMode)
+		setKoboHeader(h, "x-kobo-sync-mode", s.SyncMode)
 	}
 	// Ask the device to come back if the store has more, or if we truncated.
 	return items, s.Continue || deferred

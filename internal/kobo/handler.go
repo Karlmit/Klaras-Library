@@ -106,6 +106,16 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Delete("/v1/library/{uuid}", h.handleArchive)
 
 		r.Get("/v1/initialization", h.handleInitialization)
+
+		// Three store endpoints the device calls before every sync. They are
+		// answered specifically rather than with the generic empty object,
+		// because calibre-web special-cases exactly these when store proxying
+		// is off -- upstream would not carry that code if "{}" were accepted.
+		// A device that cannot read one of them abandons the sync it was about
+		// to start, which looks identical to a sync failure.
+		r.HandleFunc("/v1/analytics/gettests", h.handleGetTests)
+		r.Get("/v1/user/loyalty/benefits", h.handleBenefits)
+		r.Get("/v1/user/profile", h.handleUserProfile)
 		r.Get("/download/{id}/{format}", h.handleDownload)
 		r.Get("/{uuid}/{width}/{height}/{greyscale}/image.jpg", h.handleImage)
 		r.Get("/{uuid}/{width}/{height}/{quality}/{greyscale}/image.jpg", h.handleImage)
@@ -115,6 +125,38 @@ func (h *Handler) Routes(r chi.Router) {
 		// eventually show sync errors.
 		r.HandleFunc("/*", h.handleFallback)
 	})
+}
+
+// handleGetTests answers the device's A/B-test probe.
+//
+// The device echoes its own user key back and expects to see it; calibre-web
+// returns this exact shape with proxying off.
+func (h *Handler) handleGetTests(w http.ResponseWriter, r *http.Request) {
+	if h.proxyStore {
+		h.proxyToKoboStore(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"Result":  "Success",
+		"TestKey": r.Header.Get("X-Kobo-userkey"),
+		"Tests":   map[string]any{},
+	})
+}
+
+// handleBenefits reports that this account has no Kobo loyalty benefits.
+func (h *Handler) handleBenefits(w http.ResponseWriter, r *http.Request) {
+	if h.proxyStore {
+		h.proxyToKoboStore(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"Benefits": map[string]any{}})
+}
+
+// handleUserProfile answers the profile probe with an empty object, matching
+// calibre-web. It is listed explicitly only so the route exists ahead of the
+// catch-all and shows up in the log under its own name.
+func (h *Handler) handleUserProfile(w http.ResponseWriter, r *http.Request) {
+	h.handleFallback(w, r)
 }
 
 // logRequests records every Kobo call, including the ones that fail.
@@ -377,13 +419,30 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 		contSync = contSync || storeCont
 	}
 
+	// Encode into a buffer rather than streaming to the socket.
+	//
+	// Go switches to chunked transfer encoding once a response passes its 2 KB
+	// sniff buffer, and a sync response is normally larger than that, so the
+	// device was getting a chunked body with no Content-Length while
+	// calibre-web (Flask) always sends one. Sync responses are bounded by the
+	// page limit, so buffering costs a few hundred KB at most and removes a
+	// difference from the one client we cannot debug.
+	body, err := json.Marshal(items)
+	if err != nil {
+		h.log.Error("kobo sync: encode", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	body = append(body, '\n')
+
 	tok.WriteHeader(w.Header())
 	if contSync {
-		w.Header().Set("x-kobo-sync", "continue")
+		setKoboHeader(w.Header(), "x-kobo-sync", "continue")
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if err := json.NewEncoder(w).Encode(items); err != nil {
-		h.log.Error("kobo sync: encode", "err", err)
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	if _, err := w.Write(body); err != nil {
+		h.log.Error("kobo sync: write", "err", err)
 	}
 
 	h.log.Info("kobo sync", "user", u.Username, "items", len(items),

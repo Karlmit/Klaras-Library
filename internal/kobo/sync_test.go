@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -399,6 +400,86 @@ func TestUnimplementedEndpointsAreNotErrors(t *testing.T) {
 	}
 }
 
+// TestStoreProbeShapes pins the three answers calibre-web gives specifically
+// rather than generically when store proxying is off.
+//
+// The device calls all of these immediately before every sync. Upstream would
+// not carry per-endpoint code for them if an empty object were accepted, and a
+// device that cannot read one abandons the sync it was about to start -- which
+// on the device reads as "sync failed", with the sync itself having returned
+// 200.
+func TestStoreProbeShapes(t *testing.T) {
+	f := newFixture(t, 1)
+
+	req, _ := http.NewRequest(http.MethodPost, f.srv.URL+"/kobo/"+f.token+"/v1/analytics/gettests", nil)
+	req.Header.Set("X-Kobo-userkey", "abc123")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tests map[string]any
+	decodeJSON(t, res, &tests)
+	if tests["Result"] != "Success" {
+		t.Errorf("gettests Result = %v, want Success", tests["Result"])
+	}
+	if tests["TestKey"] != "abc123" {
+		t.Errorf("gettests TestKey = %v, want the userkey echoed back", tests["TestKey"])
+	}
+	if _, ok := tests["Tests"]; !ok {
+		t.Error("gettests has no Tests member")
+	}
+
+	res, err = http.Get(f.srv.URL + "/kobo/" + f.token + "/v1/user/loyalty/benefits")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var benefits map[string]any
+	decodeJSON(t, res, &benefits)
+	if _, ok := benefits["Benefits"]; !ok {
+		t.Errorf("benefits = %v, want a Benefits member", benefits)
+	}
+}
+
+// TestInitializationCarriesAPIToken guards a header calibre-web always sends
+// with the resource table.
+func TestInitializationCarriesAPIToken(t *testing.T) {
+	f := newFixture(t, 1)
+	res, err := http.Get(f.srv.URL + "/kobo/" + f.token + "/v1/initialization")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if got := res.Header.Get("x-kobo-apitoken"); got != "e30=" {
+		t.Errorf("x-kobo-apitoken = %q, want %q", got, "e30=")
+	}
+}
+
+// TestSyncSendsContentLength guards against Go's chunked encoding.
+//
+// Go streams once a response passes its sniff buffer, so a sync large enough to
+// matter went out chunked with no length while calibre-web (Flask) always sends
+// one. The device is the only client here that cannot be inspected, so it gets
+// the framing the server it is known to work with uses.
+func TestSyncSendsContentLength(t *testing.T) {
+	f := newFixture(t, 40)
+	res, err := http.Get(f.srv.URL + "/kobo/" + f.token + "/v1/library/sync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if len(body) < 2048 {
+		t.Fatalf("fixture produced only %d bytes; too small to exercise chunking", len(body))
+	}
+	if res.ContentLength != int64(len(body)) {
+		t.Errorf("Content-Length = %d, body = %d bytes (chunked responses report -1)",
+			res.ContentLength, len(body))
+	}
+	if len(res.TransferEncoding) > 0 {
+		t.Errorf("response used transfer encoding %v, want none", res.TransferEncoding)
+	}
+}
+
 // TestDownloadURLsAreAbsoluteHTTPS guards a deployment footgun: the device
 // resolves these itself and silently fails on plain http.
 func TestDownloadURLsAreAbsoluteHTTPS(t *testing.T) {
@@ -588,5 +669,17 @@ func TestInitializationReturnsTheFullResourceTable(t *testing.T) {
 		if !strings.Contains(s, "library.example.com") {
 			t.Errorf("resource %q = %q, expected it to point at this server", k, s)
 		}
+	}
+}
+
+// decodeJSON reads a response body into v and closes it.
+func decodeJSON(t *testing.T, res *http.Response, v any) {
+	t.Helper()
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200", res.StatusCode)
+	}
+	if err := json.NewDecoder(res.Body).Decode(v); err != nil {
+		t.Fatalf("decode: %v", err)
 	}
 }

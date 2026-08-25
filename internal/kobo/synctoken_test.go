@@ -23,7 +23,7 @@ func TestSyncTokenPreservesSubSecond(t *testing.T) {
 	tok.WriteHeader(rec.Header())
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set(SyncTokenHeader, rec.Header().Get(SyncTokenHeader))
+	req.Header.Set(SyncTokenHeader, koboHeaderValue(rec.Header(), SyncTokenHeader))
 	back := SyncTokenFromRequest(req)
 
 	// A microsecond of slack: the value travels through a float64.
@@ -89,4 +89,38 @@ func TestSyncTokenUnpaddedBase64(t *testing.T) {
 		t.Errorf("unpadded token lost its position: got %s, want %s",
 			back.BooksLastModified, original)
 	}
+}
+
+// TestKoboHeadersAreLowercase pins the wire casing.
+//
+// HTTP header names are case-insensitive, so this is not correctness in the
+// spec sense -- it is compatibility with the one client that cannot be
+// inspected. calibre-web sends these names lowercase and the device is known to
+// work against it; Header.Set would silently canonicalise them and there would
+// be no way to notice from the Go side.
+func TestKoboHeadersAreLowercase(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewSyncToken().WriteHeader(rec.Header())
+	setKoboHeader(rec.Header(), "x-kobo-sync", "continue")
+
+	for _, name := range []string{SyncTokenHeader, "x-kobo-sync"} {
+		if _, ok := rec.Header()[name]; !ok {
+			t.Errorf("%q is not on the response under that exact name; got keys %v",
+				name, keysOf(rec.Header()))
+		}
+		if _, ok := rec.Header()[http.CanonicalHeaderKey(name)]; ok {
+			t.Errorf("%q was also written canonicalised, so the device sees it twice", name)
+		}
+		if got := koboHeaderValue(rec.Header(), name); got == "" {
+			t.Errorf("koboHeaderValue(%q) came back empty", name)
+		}
+	}
+}
+
+func keysOf(h http.Header) []string {
+	out := make([]string, 0, len(h))
+	for k := range h {
+		out = append(out, k)
+	}
+	return out
 }
