@@ -1,6 +1,7 @@
 package kobo
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -327,25 +328,75 @@ func (h *Handler) servePlaceholder(w http.ResponseWriter, width int) {
 // Every URL here points back at us, which is what redirects the device away
 // from the Kobo store and at this library.
 func (h *Handler) handleInitialization(w http.ResponseWriter, r *http.Request) {
-	// The device saves whatever this returns into its own configuration, so
-	// sending a URL we know is unusable would break the reader persistently.
-	// Better to send nothing and let it keep what it already has.
-	if strings.TrimSpace(h.externalURL) == "" {
-		h.log.Warn("refusing to send image URLs: KLARAS_EXTERNAL_URL is not set, " +
-			"and the device would store whatever it is given")
-		writeJSON(w, http.StatusOK, map[string]any{"Resources": map[string]any{}})
-		return
+	// Start from the complete native table. The device REPLACES its stored
+	// resource list with whatever comes back, so returning a subset does not
+	// mean "leave the rest alone" -- it means "blank the rest", which is how
+	// a reader ends up with an empty account_page, autocomplete, categories
+	// and every other endpoint it needs, and stops syncing.
+	res := nativeKoboResources()
+
+	// When proxying, prefer the live table so it tracks whatever Kobo changes,
+	// falling back to ours if the store is slow or unreachable.
+	if h.proxyStore {
+		if live := h.fetchStoreResources(r); live != nil {
+			for k, v := range live {
+				res[k] = v
+			}
+		}
 	}
 
-	base := strings.TrimRight(h.externalURL, "/") + "/kobo/" + tokenOf(r)
-	res := map[string]any{
-		"Resources": map[string]any{
-			"image_host":                 strings.TrimRight(h.externalURL, "/"),
-			"image_url_template":         base + "/{ImageId}/{Width}/{Height}/false/image.jpg",
-			"image_url_quality_template": base + "/{ImageId}/{Width}/{Height}/{Quality}/{IsGreyscale}/image.jpg",
-		},
+	// Then point only the image URLs at us, so covers come from this library.
+	if base := strings.TrimRight(h.externalURL, "/"); base != "" {
+		prefix := base + "/kobo/" + tokenOf(r)
+		res["image_host"] = base
+		res["image_url_template"] = prefix + "/{ImageId}/{Width}/{Height}/false/image.jpg"
+		res["image_url_quality_template"] = prefix +
+			"/{ImageId}/{Width}/{Height}/{Quality}/{IsGreyscale}/image.jpg"
+	} else {
+		// No external URL configured: leave Kobo's own CDN in place rather
+		// than handing the device an address it will store and cannot reach.
+		h.log.Warn("KLARAS_EXTERNAL_URL is not set; leaving Kobo's image CDN in the " +
+			"device's resource table, so covers will not come from this library")
 	}
-	writeJSON(w, http.StatusOK, res)
+
+	writeJSON(w, http.StatusOK, map[string]any{"Resources": res})
+}
+
+// fetchStoreResources reads the live resource table from the Kobo store.
+func (h *Handler) fetchStoreResources(r *http.Request) map[string]any {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		koboStoreHost+"/v1/initialization", nil)
+	if err != nil {
+		return nil
+	}
+	for k, vs := range r.Header {
+		if isHopByHop(k) || strings.EqualFold(k, "Host") {
+			continue
+		}
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
+	resp, err := proxyClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		h.log.Debug("could not read the live Kobo resource table; using the built-in one")
+		return nil
+	}
+	defer resp.Body.Close()
+
+	var body struct {
+		Resources map[string]any `json:"Resources"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&body); err != nil {
+		return nil
+	}
+	return body.Resources
 }
 
 // handleFallback answers the many endpoints a device probes that we do not

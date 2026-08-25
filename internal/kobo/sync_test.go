@@ -542,3 +542,51 @@ func TestStoreMergeAdvancesWhenComplete(t *testing.T) {
 		t.Errorf("store position not advanced after a complete batch: %q", tok.RawKoboStoreToken)
 	}
 }
+
+// TestInitializationReturnsTheFullResourceTable is a regression guard with
+// teeth: a device REPLACES its stored resource list with this response, so
+// returning a subset blanks every endpoint left out. Klara's reader lost about
+// 130 of them that way and stopped syncing, with nothing in the server logs.
+func TestInitializationReturnsTheFullResourceTable(t *testing.T) {
+	f := newFixture(t, 1)
+
+	res, err := http.Get(f.srv.URL + "/kobo/" + f.token + "/v1/initialization")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+
+	var body struct {
+		Resources map[string]any `json:"Resources"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := len(body.Resources); n < 100 {
+		t.Errorf("returned %d resources; the device expects the full table of ~150 "+
+			"and blanks anything missing", n)
+	}
+	// The endpoints that were empty on Klara's device.
+	for _, k := range []string{
+		"account_page", "autocomplete", "categories", "eula_page", "book",
+		"book_detail_page", "library_sync", "user_profile", "tags",
+		"device_auth", "products", "featured_lists",
+	} {
+		v, ok := body.Resources[k]
+		if !ok {
+			t.Errorf("resource %q is missing; the device would blank it", k)
+			continue
+		}
+		if s, isStr := v.(string); isStr && s == "" {
+			t.Errorf("resource %q is empty", k)
+		}
+	}
+	// ...and the three that must point back at us.
+	for _, k := range []string{"image_host", "image_url_template", "image_url_quality_template"} {
+		s, _ := body.Resources[k].(string)
+		if !strings.Contains(s, "library.example.com") {
+			t.Errorf("resource %q = %q, expected it to point at this server", k, s)
+		}
+	}
+}
