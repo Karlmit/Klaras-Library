@@ -3,7 +3,11 @@
 # ---- web ---------------------------------------------------------------------
 # The SPA is compiled here rather than expected in the build context, so
 # `docker build .` alone produces a complete image on any machine.
-FROM node:22-alpine AS web
+#
+# --platform=$BUILDPLATFORM pins this to the machine doing the building. The
+# output is JavaScript, which is architecture-independent, so running it once
+# natively beats running it once per target under emulation.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web
 
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
@@ -13,7 +17,10 @@ COPY web/ ./
 RUN npm run build
 
 # ---- build -------------------------------------------------------------------
-FROM golang:1.27-alpine AS build
+# Also pinned to the build machine. Go cross-compiles natively and CGO is off,
+# so producing an arm64 binary needs nothing but GOARCH. Building under QEMU
+# instead made a two-platform release take about eight minutes rather than one.
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 
 WORKDIR /src
 
@@ -26,10 +33,14 @@ COPY . .
 COPY --from=web /web/dist ./web/dist
 
 ARG VERSION=dev
-# CGO off keeps the binary fully static, so the runtime stage needs no libc.
+# TARGETARCH is supplied by buildx for each platform being produced.
+ARG TARGETARCH
+ARG TARGETOS=linux
+# CGO off keeps the binary fully static, so the runtime stage needs no libc,
+# and it is what makes the cross-compile a plain environment variable.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux go build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
       -trimpath \
       -ldflags "-s -w -X main.version=${VERSION}" \
       -o /out/klaras ./cmd/klaras
