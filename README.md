@@ -412,9 +412,31 @@ klaras reorganize           Bring the file tree in line with the path template
 klaras backfill-covers      Generate thumbnails for the whole library
 klaras revert-moves         Undo file moves, using the journal
 klaras doctor               Report library problems (read-only)
+klaras users                List accounts, their roles and paired devices
+klaras passwd USERNAME      Set someone's password
+klaras kobo-resync USERNAME Offer every book to their Kobo again
 klaras migrate [up|down|status]
 klaras dev-seed --books N   Synthetic books, for benchmarking on your own hardware
+klaras version
 ```
+
+Everything an operator needs day to day is also in the browser, under
+**Settings**: accounts and passwords on the Users tab, and `kobo-resync` as
+**Force a full resync** on the Kobo tab — or the `N · resync` button beside an
+account on the Users tab, to reset someone else's device. Reach for the CLI when
+the browser is not an option, not as the normal path.
+
+### When a Kobo syncs but no books arrive
+
+Run a resync. Klaras Library keeps a record of what each device has been told,
+and describes a book the device already holds as changed rather than new, so it
+is not downloaded again. When that record and the device disagree — after a
+factory reset, a restore from backup, or a sync that never finished — books can
+be described as already-owned and quietly skipped. Sync reports success and the
+collection stays empty.
+
+Forgetting the record is safe: nothing is deleted and no metadata changes. The
+device downloads the books again, which takes a few minutes.
 
 `reorganize` moves files and refuses to run without `--dry-run` first. On a
 library imported from Calibre it will move **every** book, because Calibre

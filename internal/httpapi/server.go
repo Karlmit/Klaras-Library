@@ -158,6 +158,7 @@ func (s *Server) routes() {
 				r.Get("/books/ids", s.handleBookIDs)
 				r.Get("/kobo/tokens", s.handleListKoboTokens)
 				r.Post("/kobo/tokens", s.handleKoboToken)
+				r.Post("/kobo/resync", s.handleKoboResync)
 				r.Get("/books/{id}/progress", s.handleGetProgress)
 				r.Put("/books/{id}/progress", s.handlePutProgress)
 				r.Get("/books/{id}/download/{format}", s.handleDownloadBook)

@@ -17,6 +17,7 @@ export function SettingsKobo() {
   const [fresh, setFresh] = useState<{ token: string; api_store_url: string } | null>(null)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState('')
+  const [resynced, setResynced] = useState<number | null>(null)
 
   const create = useMutation({
     mutationFn: (l: string) => koboApi.create(l),
@@ -25,6 +26,15 @@ export function SettingsKobo() {
       setLabel('')
       setError('')
       void qc.invalidateQueries({ queryKey: ['kobo-tokens'] })
+    },
+    onError: (e) => setError((e as Error).message),
+  })
+
+  const resync = useMutation({
+    mutationFn: () => koboApi.resync(),
+    onSuccess: (r) => {
+      setResynced(r.forgotten)
+      setError('')
     },
     onError: (e) => setError((e as Error).message),
   })
@@ -121,6 +131,40 @@ export function SettingsKobo() {
       ) : (
         <p className="hint">No devices paired yet.</p>
       )}
+
+      <hr style={{ margin: '24px 0 16px', border: 0, borderTop: '1px solid var(--border)' }} />
+
+      <h3 style={{ margin: '0 0 6px', fontSize: 15 }}>Send everything again</h3>
+      <p className="hint" style={{ marginTop: 0 }}>
+        Use this when a device syncs without errors but books do not arrive.
+        Klaras Library keeps a record of what each device has been told, and if
+        that record and the device disagree — after a factory reset, a restore
+        from backup, or a sync that never finished — books can be described as
+        already-owned and quietly skipped. This forgets the record, so the next
+        sync offers every book on your Kobo shelves as new.
+      </p>
+      <p className="hint">
+        It is safe: nothing is deleted and no metadata changes. The only cost is
+        that the device downloads the books again, which takes a few minutes.
+      </p>
+
+      {resynced != null && (
+        <div className="callout" style={{ marginBottom: 12 }}>
+          Forgot {resynced} book{resynced === 1 ? '' : 's'}. Sync the device now
+          — it will take longer than usual.
+        </div>
+      )}
+
+      <button
+        className="btn"
+        onClick={() => {
+          setResynced(null)
+          resync.mutate()
+        }}
+        disabled={resync.isPending}
+      >
+        {resync.isPending ? 'Forgetting…' : 'Force a full resync'}
+      </button>
     </div>
   )
 }

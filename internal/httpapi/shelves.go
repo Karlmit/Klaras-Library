@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Karlmit/Klaras-Library/internal/auth"
+	"github.com/Karlmit/Klaras-Library/internal/kobo"
 )
 
 // Shelf is a user's collection of books.
@@ -399,4 +400,36 @@ func (s *Server) handleListKoboTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tokens": out})
+}
+
+// handleKoboResync forgets what a user's devices have been told.
+//
+// This is calibre-web's "force full Kobo sync", which had a CLI command here
+// and no button -- so the one remedy for a device that syncs cleanly and
+// downloads nothing needed a shell. Users can reset their own devices; an
+// admin can reset anyone's, which is the case that matters, since the person
+// holding the Kobo is rarely the person with the server open.
+func (s *Server) handleKoboResync(w http.ResponseWriter, r *http.Request) {
+	u := s.currentUser(r)
+
+	var in struct {
+		UserID int64 `json:"user_id"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&in)
+
+	target := u.ID
+	if in.UserID != 0 && in.UserID != u.ID {
+		if u.Role != "admin" {
+			writeErr(w, http.StatusForbidden, "only an admin can resync another account")
+			return
+		}
+		target = in.UserID
+	}
+
+	n, err := kobo.ForgetSynced(r.Context(), s.db.Pool, target)
+	if err != nil {
+		s.fail(w, r, err, "kobo resync")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"forgotten": n})
 }

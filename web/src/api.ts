@@ -254,6 +254,12 @@ export const koboApi = {
       method: 'POST',
       body: JSON.stringify({ label }),
     }),
+  // Omit userId to reset your own devices; admins may pass someone else's.
+  resync: (userId?: number) =>
+    req<{ forgotten: number }>('/api/kobo/resync', {
+      method: 'POST',
+      body: JSON.stringify(userId ? { user_id: userId } : {}),
+    }),
 }
 
 export const downloadUrl = (id: number, format: string) =>

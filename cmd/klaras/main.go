@@ -29,6 +29,7 @@ import (
 	"github.com/Karlmit/Klaras-Library/internal/ingest"
 	"github.com/Karlmit/Klaras-Library/internal/jobs"
 	"github.com/Karlmit/Klaras-Library/internal/kepub"
+	"github.com/Karlmit/Klaras-Library/internal/kobo"
 	"github.com/Karlmit/Klaras-Library/internal/library"
 	"github.com/Karlmit/Klaras-Library/internal/provider"
 	"github.com/Karlmit/Klaras-Library/internal/store"
@@ -797,23 +798,17 @@ func cmdKoboResync() error {
 		return fmt.Errorf("no account called %q (try: klaras users)", username)
 	}
 
-	tag, err := db.Pool.Exec(ctx,
-		`DELETE FROM kobo_synced_books WHERE user_id=$1`, userID)
+	n, err := kobo.ForgetSynced(ctx, db.Pool, userID)
 	if err != nil {
-		return err
-	}
-	// Touch the synced shelves so the next request also re-sends the
-	// collections, not just the books.
-	if _, err := db.Pool.Exec(ctx,
-		`UPDATE shelves SET updated_at = now() WHERE user_id=$1 AND kobo_sync`, userID); err != nil {
 		return err
 	}
 
 	fmt.Fprintf(os.Stderr,
 		"Forgot %d book(s) for %s.\n"+
 			"The next sync will announce every book on their Kobo shelves as new.\n"+
-			"On the device, sync again -- it may take a little longer than usual.\n",
-		tag.RowsAffected(), username)
+			"On the device, sync again -- it may take a little longer than usual.\n"+
+			"The same button is in Settings -> Kobo in the browser.\n",
+		n, username)
 	return nil
 }
 

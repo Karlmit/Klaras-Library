@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createUser, usersApi, type UserSummary } from '../api'
+import { createUser, koboApi, usersApi, type UserSummary } from '../api'
 
 const ROLES = [
   { value: 'reader', label: 'Reader', hint: 'browse, read and download' },
@@ -14,12 +14,27 @@ export function SettingsUsers({ me }: { me: { id: number } }) {
   const [pwFor, setPwFor] = useState<UserSummary | null>(null)
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
+  const [resynced, setResynced] = useState<{ n: number; username: string } | null>(null)
 
   const refresh = () => void qc.invalidateQueries({ queryKey: ['users'] })
   const update = useMutation({
     mutationFn: (v: { id: number; patch: { role?: string; is_active?: boolean } }) =>
       usersApi.update(v.id, v.patch),
     onSuccess: () => { setError(''); refresh() },
+    onError: (e) => setError((e as Error).message),
+  })
+
+  // calibre-web's "force full Kobo sync", for someone else's device. The
+  // person holding the Kobo is rarely the person with the server open.
+  const resync = useMutation({
+    mutationFn: (id: number) => koboApi.resync(id).then((r) => ({ r, id })),
+    onSuccess: ({ r, id }) => {
+      setError('')
+      setResynced({
+        n: r.forgotten,
+        username: data?.users.find((u) => u.id === id)?.username ?? 'that account',
+      })
+    },
     onError: (e) => setError((e as Error).message),
   })
 
@@ -46,6 +61,14 @@ export function SettingsUsers({ me }: { me: { id: number } }) {
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
         <button className="btn" onClick={() => setAdding(true)}>Add user</button>
       </div>
+
+      {resynced && (
+        <div className="callout" style={{ marginBottom: 12 }}>
+          Forgot {resynced.n} book{resynced.n === 1 ? '' : 's'} for{' '}
+          <strong>{resynced.username}</strong>. Their Kobo will offer everything
+          again on the next sync, which will take longer than usual.
+        </div>
+      )}
 
       <table className="table">
         <thead>
@@ -80,7 +103,27 @@ export function SettingsUsers({ me }: { me: { id: number } }) {
                 </select>
               </td>
               <td>{u.shelves}</td>
-              <td>{u.kobo_tokens}</td>
+              <td>
+                {u.kobo_tokens > 0 ? (
+                  <button
+                    className="btn btn--sm btn--ghost"
+                    title={
+                      'Forget what this account\u2019s Kobo devices have been told, ' +
+                      'so the next sync offers every book again. Use it when a device ' +
+                      'syncs without errors but books do not arrive.'
+                    }
+                    disabled={resync.isPending}
+                    onClick={() => {
+                      setResynced(null)
+                      resync.mutate(u.id)
+                    }}
+                  >
+                    {u.kobo_tokens} · resync
+                  </button>
+                ) : (
+                  u.kobo_tokens
+                )}
+              </td>
               <td>
                 <label className="switch">
                   <input
