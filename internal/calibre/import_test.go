@@ -287,3 +287,151 @@ func TestImportLibrary(t *testing.T) {
 		}
 	})
 }
+
+// TestDryRunCoversTheAppDBImportToo is a regression guard.
+//
+// The two halves used to run in separate transactions, so --dry-run rolled the
+// library back and the app.db pass then refused with "library is empty". That
+// made the dry run useless for the thing people most need to check before
+// committing: whether their users, shelves and Kobo tokens come across.
+func TestDryRunCoversTheAppDBImportToo(t *testing.T) {
+	pool := importTestPool(t)
+	ctx := context.Background()
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	src, err := calibre.OpenSource(buildFixtureLibrary(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+
+	app, err := calibre.OpenAppDB(buildFixtureAppDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+
+	// Start from empty so the dry run cannot be reading leftovers.
+	if _, err := pool.Exec(ctx, `TRUNCATE books, users RESTART IDENTITY CASCADE`); err != nil {
+		t.Fatal(err)
+	}
+
+	res, ares, err := calibre.ImportAll(ctx, pool, src, app,
+		calibre.Options{DryRun: true, Purge: true}, log)
+	if err != nil {
+		t.Fatalf("dry run failed: %v", err)
+	}
+	if res.Books == 0 {
+		t.Error("dry run reported no books")
+	}
+	if ares == nil {
+		t.Fatal("dry run skipped the app.db import entirely")
+	}
+	if ares.Users == 0 {
+		t.Error("dry run reported no users; this is exactly what people need to see")
+	}
+	if ares.Shelves == 0 {
+		t.Error("dry run reported no shelves")
+	}
+	if ares.KoboTokens == 0 {
+		t.Error("dry run reported no Kobo tokens")
+	}
+
+	// And nothing was actually written.
+	var books, users int64
+	if err := pool.QueryRow(ctx,
+		`SELECT (SELECT count(*) FROM books), (SELECT count(*) FROM users)`).
+		Scan(&books, &users); err != nil {
+		t.Fatal(err)
+	}
+	if books != 0 || users != 0 {
+		t.Errorf("dry run committed data: %d books, %d users", books, users)
+	}
+}
+
+// TestImportAllIsAtomic checks the other half of sharing one transaction.
+func TestImportAllIsAtomic(t *testing.T) {
+	pool := importTestPool(t)
+	ctx := context.Background()
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	src, err := calibre.OpenSource(buildFixtureLibrary(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	app, err := calibre.OpenAppDB(buildFixtureAppDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+
+	res, ares, err := calibre.ImportAll(ctx, pool, src, app,
+		calibre.Options{Purge: true}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Committed || !ares.Committed {
+		t.Error("a real run did not report itself committed")
+	}
+
+	// Shelf membership survived, which needs both halves to have landed.
+	var shelfBooks int64
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM shelf_books`).Scan(&shelfBooks); err != nil {
+		t.Fatal(err)
+	}
+	if shelfBooks == 0 {
+		t.Error("no shelf membership; the two halves did not see each other")
+	}
+}
+
+// buildFixtureAppDB writes a miniature calibre-web app.db.
+func buildFixtureAppDB(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// role 479 is calibre-web's admin bitmask; 32 is its anonymous Guest.
+	if _, err := db.Exec(`
+CREATE TABLE user (id INTEGER PRIMARY KEY, name VARCHAR, email VARCHAR, role SMALLINT,
+  password VARCHAR, kindle_mail VARCHAR, locale VARCHAR, sidebar_view INTEGER,
+  default_language VARCHAR, denied_tags VARCHAR, allowed_tags VARCHAR,
+  denied_column_value VARCHAR, allowed_column_value VARCHAR, view_settings JSON,
+  kobo_only_shelves_sync INTEGER);
+CREATE TABLE shelf (id INTEGER PRIMARY KEY, uuid VARCHAR, name VARCHAR, is_public INTEGER,
+  user_id INTEGER, kobo_sync BOOLEAN, created DATETIME, last_modified DATETIME);
+CREATE TABLE book_shelf_link (id INTEGER PRIMARY KEY, book_id INTEGER, "order" INTEGER,
+  shelf INTEGER, date_added DATETIME);
+CREATE TABLE remote_auth_token (id INTEGER PRIMARY KEY, auth_token VARCHAR, user_id INTEGER,
+  verified BOOLEAN, expiration DATETIME, token_type INTEGER);
+CREATE TABLE book_read_link (id INTEGER PRIMARY KEY, book_id INTEGER, user_id INTEGER,
+  read_status INTEGER NOT NULL, last_modified DATETIME, last_time_started_reading DATETIME,
+  times_started_reading INTEGER NOT NULL);
+CREATE TABLE kobo_reading_state (id INTEGER PRIMARY KEY, user_id INTEGER, book_id INTEGER,
+  last_modified DATETIME, priority_timestamp DATETIME);
+CREATE TABLE kobo_bookmark (id INTEGER PRIMARY KEY, kobo_reading_state_id INTEGER,
+  last_modified DATETIME, location_source VARCHAR, location_type VARCHAR,
+  location_value VARCHAR, progress_percent FLOAT, content_source_progress_percent FLOAT);
+CREATE TABLE kobo_statistics (id INTEGER PRIMARY KEY, kobo_reading_state_id INTEGER,
+  last_modified DATETIME, remaining_time_minutes INTEGER, spent_reading_minutes INTEGER);
+
+INSERT INTO user (id,name,email,role,locale) VALUES
+  (1,'klara','klara@example.com',479,'sv'),
+  (2,'Guest','no@email',32,'en');
+INSERT INTO shelf (id,uuid,name,is_public,user_id,kobo_sync,created,last_modified) VALUES
+  (1,'5025a22e-0a24-4eef-94c5-2d3102a8fe8a','Kobo',0,1,1,
+   '2025-01-01 00:00:00+00:00','2025-01-02 00:00:00+00:00');
+INSERT INTO book_shelf_link (book_id,"order",shelf,date_added)
+  VALUES (1,0,1,'2025-01-01 00:00:00+00:00');
+INSERT INTO remote_auth_token (auth_token,user_id,verified,token_type)
+  VALUES ('4cb0db941b0356b37b6d134baa81eac2',1,0,1);
+`); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}

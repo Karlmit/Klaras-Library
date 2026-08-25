@@ -85,21 +85,39 @@ func mapRole(mask int64) (role string, skip bool) {
 // ids, and any that point at a book the library import did not produce are
 // dropped and counted rather than failing the whole import.
 func ImportAppDB(ctx context.Context, pool *pgxpool.Pool, app *AppDB, opts Options, log *slog.Logger) (*AppResult, error) {
-	start := time.Now()
-	res := &AppResult{}
-
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
+	res, err := importAppDBTx(ctx, tx, app, opts, log)
+	if err != nil {
+		return nil, err
+	}
+	if opts.DryRun {
+		log.Warn("dry run: rolling back app.db import")
+		return res, nil
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	res.Committed = true
+	return res, nil
+}
+
+// importAppDBTx does the work inside a caller-supplied transaction.
+func importAppDBTx(ctx context.Context, tx pgx.Tx, app *AppDB, opts Options, log *slog.Logger) (*AppResult, error) {
+	start := time.Now()
+	res := &AppResult{}
+
 	var books int64
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM books`).Scan(&books); err != nil {
 		return nil, err
 	}
 	if books == 0 {
-		return nil, fmt.Errorf("library is empty; run the library import before the app.db import")
+		return nil, fmt.Errorf("no books in the library; shelves and reading state " +
+			"have nothing to attach to, so import the library first")
 	}
 
 	if opts.Purge {
@@ -129,15 +147,6 @@ func ImportAppDB(ctx context.Context, pool *pgxpool.Pool, app *AppDB, opts Optio
 		}
 	}
 
-	res.Elapsed = time.Since(start)
-	if opts.DryRun {
-		log.Warn("dry run: rolling back app.db import")
-		return res, nil
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-	res.Committed = true
 	res.Elapsed = time.Since(start)
 	return res, nil
 }

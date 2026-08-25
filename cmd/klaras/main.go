@@ -307,24 +307,25 @@ func cmdImport() error {
 	}
 	defer db.Close()
 
-	res, err := calibre.ImportLibrary(ctx, db.Pool, src,
+	// Both halves share one transaction, so --dry-run exercises the app.db
+	// import too, and a real run never leaves a committed library with no
+	// shelves or users attached.
+	var adb *calibre.AppDB
+	if *appDB != "" {
+		adb, err = calibre.OpenAppDB(*appDB)
+		if err != nil {
+			return err
+		}
+		defer adb.Close()
+	}
+
+	res, ares, err := calibre.ImportAll(ctx, db.Pool, src, adb,
 		calibre.Options{DryRun: *dryRun, Purge: *purge}, log)
 	if err != nil {
 		return err
 	}
 
-	if *appDB != "" {
-		adb, err := calibre.OpenAppDB(*appDB)
-		if err != nil {
-			return err
-		}
-		defer adb.Close()
-
-		ares, err := calibre.ImportAppDB(ctx, db.Pool, adb,
-			calibre.Options{DryRun: *dryRun, Purge: *purge}, log)
-		if err != nil {
-			return err
-		}
+	if ares != nil {
 		fmt.Fprintf(os.Stderr, "\ncalibre-web state:\n")
 		fmt.Fprintf(os.Stderr, "  users        %d (skipped %d)\n", ares.Users, ares.SkippedUser)
 		fmt.Fprintf(os.Stderr, "  shelves      %d\n", ares.Shelves)
@@ -333,9 +334,13 @@ func cmdImport() error {
 		fmt.Fprintf(os.Stderr, "  kobo tokens  %d\n", ares.KoboTokens)
 		fmt.Fprintf(os.Stderr, "  read states  %d\n", ares.ReadStates)
 		if ares.Users > 0 {
-			fmt.Fprintf(os.Stderr, "  NOTE: imported users must set a new password "+
-				"(calibre-web scrypt hashes cannot be converted to argon2id)\n")
+			fmt.Fprintf(os.Stderr, "  NOTE: imported accounts have no usable password "+
+				"(calibre-web scrypt hashes cannot be converted to argon2id).\n"+
+				"        Set one for each with:  klaras passwd USERNAME\n")
 		}
+	} else {
+		fmt.Fprintf(os.Stderr, "\nNo --calibre-web-db given, so no users, shelves or "+
+			"Kobo tokens were imported.\n")
 	}
 
 	fmt.Fprintf(os.Stderr, "\nImported in %s%s\n", res.Elapsed.Round(time.Millisecond),

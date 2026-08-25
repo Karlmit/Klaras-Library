@@ -56,25 +56,51 @@ const calibreEpochYear = 102
 // value permanently, which is what distinguishes an imported book from one
 // created here later.
 func ImportLibrary(ctx context.Context, pool *pgxpool.Pool, src *Source, opts Options, log *slog.Logger) (*Result, error) {
-	start := time.Now()
-	res := &Result{Skipped: map[string]int64{}, imported: map[int64]struct{}{}}
-
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after a successful commit
 
+	res, err := importLibraryTx(ctx, tx, src, opts, log)
+	if err != nil {
+		return nil, err
+	}
+	if opts.DryRun {
+		log.Warn("dry run: rolling back", "elapsed", res.Elapsed.Round(time.Millisecond))
+		return res, nil // the deferred Rollback does the work
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit: %w", err)
+	}
+	res.Committed = true
+	return res, nil
+}
+
+// importLibraryTx does the work inside a caller-supplied transaction, so the
+// library and calibre-web imports can share one. That matters twice over: a
+// dry run must let the app.db pass see the books the library pass just wrote,
+// and a real run must not leave a committed library with no shelves attached
+// if the second half fails.
+func importLibraryTx(ctx context.Context, tx pgx.Tx, src *Source, opts Options, log *slog.Logger) (*Result, error) {
+	start := time.Now()
+	res := &Result{Skipped: map[string]int64{}, imported: map[int64]struct{}{}}
+
 	var existing int64
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM books`).Scan(&existing); err != nil {
 		return nil, err
 	}
-	if existing > 0 {
-		if !opts.Purge {
-			return nil, fmt.Errorf("destination already holds %d books; "+
-				"re-run with --purge to replace them", existing)
+	if existing > 0 && !opts.Purge {
+		return nil, fmt.Errorf("destination already holds %d books; "+
+			"re-run with --purge to replace them", existing)
+	}
+	// Purge unconditionally when asked, not only when books exist. An
+	// interrupted earlier attempt can leave authors or tags behind with no
+	// books, and those would then collide on their primary keys.
+	if opts.Purge {
+		if existing > 0 {
+			log.Warn("purging destination library", "books", existing)
 		}
-		log.Warn("purging destination library", "books", existing)
 		if _, err := tx.Exec(ctx, `TRUNCATE books, authors, series, publishers, tags,
 			book_authors, book_tags, identifiers, book_files RESTART IDENTITY CASCADE`); err != nil {
 			return nil, fmt.Errorf("purge: %w", err)
@@ -158,16 +184,49 @@ func ImportLibrary(ctx context.Context, pool *pgxpool.Pool, src *Source, opts Op
 	}
 
 	res.Elapsed = time.Since(start)
+	return res, nil
+}
+
+// ImportAll runs the library and calibre-web imports in a single transaction.
+//
+// This is what the CLI uses. Either everything lands or nothing does, and a
+// --dry-run exercises both halves rather than reporting that the library is
+// empty because it just rolled its own work back.
+func ImportAll(ctx context.Context, pool *pgxpool.Pool, src *Source, app *AppDB,
+	opts Options, log *slog.Logger) (*Result, *AppResult, error) {
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after a successful commit
+
+	res, err := importLibraryTx(ctx, tx, src, opts, log)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ares *AppResult
+	if app != nil {
+		ares, err = importAppDBTx(ctx, tx, app, opts, log)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
 	if opts.DryRun {
-		log.Warn("dry run: rolling back", "elapsed", res.Elapsed.Round(time.Millisecond))
-		return res, nil // deferred Rollback does the work
+		log.Warn("dry run: rolling back everything",
+			"elapsed", res.Elapsed.Round(time.Millisecond))
+		return res, ares, nil
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit: %w", err)
+		return nil, nil, fmt.Errorf("commit: %w", err)
 	}
 	res.Committed = true
-	res.Elapsed = time.Since(start)
-	return res, nil
+	if ares != nil {
+		ares.Committed = true
+	}
+	return res, ares, nil
 }
 
 func resetSequences(ctx context.Context, tx pgx.Tx) error {
