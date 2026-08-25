@@ -26,6 +26,24 @@ jobs:
           go-version: '1.27'
           cache: true
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The Go binary embeds web/dist, and the repo carries only a placeholder
+      # there, so the UI is built before anything Go runs.
+      - name: Build the web UI
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Type-check the web UI
+        working-directory: web
+        run: npx tsc -b --noEmit
+
       - name: Verify formatting
         run: |
           out=$(gofmt -l . | grep -v '^web/' || true)

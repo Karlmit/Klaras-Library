@@ -54,7 +54,12 @@ func (s *Server) mountSPA(r chi.Router, assets fs.FS) {
 func (s *Server) serveIndex(w http.ResponseWriter, req *http.Request, assets fs.FS) {
 	b, err := fs.ReadFile(assets, "index.html")
 	if err != nil {
-		http.Error(w, "UI not built", http.StatusNotFound)
+		// web/dist holds only its placeholder: this binary was built without
+		// running the frontend build. The API still works.
+		s.log.Error("the web UI is not present in this binary; " +
+			"build it with `make build`, or use the published container image")
+		http.Error(w, "the web interface was not built into this binary; "+
+			"the API is still available under /api", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

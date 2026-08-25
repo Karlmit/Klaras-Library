@@ -1,0 +1,8 @@
+This directory holds the compiled single-page application, which web/embed.go
+embeds into the binary.
+
+It is committed empty on purpose: //go:embed fails outright on a missing
+directory, so without this placeholder `go build ./...` would not work on a
+fresh clone until someone had run `npm run build` in web/. The real contents
+are produced by that command, or by the web stage of the Dockerfile, and are
+git-ignored.
