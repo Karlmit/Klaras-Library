@@ -74,9 +74,11 @@ services:
       # not the container. Must be https: Kobo fails silently on plain http.
       - KLARAS_EXTERNAL_URL=https://library.example.com
       - KLARAS_LOG_LEVEL=info
-      # Let the device still reach the real Kobo shop for anything that is not
-      # your library. "false" keeps it from talking to Kobo at all.
-      - KLARAS_KOBO_PROXY_STORE=false
+      # true  = the shop, your Kobo account and any purchased or borrowed Kobo
+      #         books keep working, merged into the same sync.
+      # false = the device talks only to this server. More private, but
+      #         purchased Kobo books stop appearing.
+      - KLARAS_KOBO_PROXY_STORE=true
     volumes:
       # Your ebook library. Klaras owns this tree and moves files within it, so
       # point it at the library itself, not a parent folder.
@@ -203,16 +205,59 @@ docker compose exec klaras-library klaras revert-moves --since 24h --yes
 
 ## Kobo setup
 
-1. In the web UI, create a sync token for your user. You are given the exact URL
-   the device needs.
-2. On the Kobo, set `api_store` in `.kobo/Kobo/Kobo eReader.conf` to that URL.
-3. Mark a shelf **Kobo sync**. Its books appear on the device as a Collection.
+### Moving a device across from calibre-web
+
+**No new sync token is needed.** The import brings your existing token over
+unchanged, so the device's credentials still work. Only the hostname has to
+point somewhere new, and there are two ways to do that:
+
+- **Repoint your existing hostname** at the new container. Nothing changes on
+  the device at all, and rolling back is just pointing it at calibre-web again.
+  This is the smoother option.
+- **Use a new hostname**, and edit `api_store` in `.kobo/Kobo/Kobo eReader.conf`
+  on the device. Useful if you want both servers reachable at once.
+
+The device also keeps its sync position, because the token format is
+wire-compatible with calibre-web's, field for field. It will resume rather than
+re-download the shelf.
+
+For a device that has never synced, create a token in the web UI and you are
+given the exact `api_store` URL to paste.
+
+### Kobo store proxying
+
+`KLARAS_KOBO_PROXY_STORE` decides what happens to the requests the device makes
+that are nothing to do with your library — the shop, recommendations, your Kobo
+account, Kobo Plus, OverDrive.
+
+| | `true` | `false` |
+|---|---|---|
+| Your library | syncs | syncs |
+| Books bought from Kobo | sync, merged into the same response | do not appear |
+| Shop / account / Kobo Plus screens | work | empty |
+| Device talks to Kobo | yes | never |
+| Outbound call per sync | yes, ~12s cap, fails soft | no |
+
+**Set it to `true` if the device is ever used with the Kobo store.** Setting it
+to `false` makes the device talk only to your server, which is more private and
+one less moving part, but purchased and borrowed books stop arriving.
+
+If you are migrating from calibre-web, match what you had: check
+`config_kobo_proxy` in its `app.db`, or the "Proxy unknown requests to Kobo
+Store" checkbox in its admin page.
+
+When proxying is on, the sync response merges Kobo's entitlements with your
+library's, and the store's own sync position is carried inside our token — so
+both stay in step over the single header the device knows about. If Kobo is
+slow or unreachable, that round is skipped and only your library is served; the
+store position is not advanced, so nothing is lost.
+
+### Reverse proxy
 
 Two things bite people repeatedly with calibre-web and apply equally here:
 
-- **TLS 1.2 must be enabled on your reverse proxy.** Kobo firmware ships an old
-  TLS client, and a "modern compatibility" profile that permits only TLS 1.3
-  will fail.
+- **TLS 1.2 must be enabled.** Kobo firmware ships an old TLS client, and a
+  "modern compatibility" profile that permits only TLS 1.3 will fail.
 - **Forward `X-Forwarded-Proto: https`.** Without it the device is handed
   `http://` download URLs, which fail silently.
 

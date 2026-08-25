@@ -13,9 +13,11 @@ services:
       # not the container. Must be https: Kobo fails silently on plain http.
       - KLARAS_EXTERNAL_URL=https://library.example.com
       - KLARAS_LOG_LEVEL=info
-      # Let the device still reach the real Kobo shop for anything that is not
-      # your library. "false" keeps it from talking to Kobo at all.
-      - KLARAS_KOBO_PROXY_STORE=false
+      # true  = the shop, your Kobo account and any purchased or borrowed Kobo
+      #         books keep working, merged into the same sync.
+      # false = the device talks only to this server. More private, but
+      #         purchased Kobo books stop appearing.
+      - KLARAS_KOBO_PROXY_STORE=true
     volumes:
       # Your ebook library. Klaras owns this tree and moves files within it, so
       # point it at the library itself, not a parent folder.

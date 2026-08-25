@@ -138,6 +138,11 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 	items := make([]any, 0, h.syncLimit)
 	contSync := false
 
+	// The store round trip runs alongside the local queries rather than after
+	// them: the device is waiting, and Kobo's latency is not ours to control.
+	storeCh := make(chan *storeSyncResult, 1)
+	go func() { storeCh <- h.syncWithStore(ctx, r, tok) }()
+
 	// --- books -------------------------------------------------------------
 	books, more, err := h.engine.changedBooks(ctx, u.ID, tok.BooksLastModified, h.syncLimit)
 	if err != nil {
@@ -265,6 +270,17 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 	tok.TagsLastModified = newestTag
 	tok.ReadingStateLastModified = newestState
 
+	// Fold in whatever the real Kobo store had to say, if proxying is on.
+	// Without this, a device with purchased Kobo books would watch them vanish
+	// the moment its library moved here.
+	var storeItems int
+	if store := <-storeCh; store != nil {
+		storeItems = len(store.Items)
+		var storeCont bool
+		items, storeCont = store.apply(items, tok, w.Header())
+		contSync = contSync || storeCont
+	}
+
 	tok.WriteHeader(w.Header())
 	if contSync {
 		w.Header().Set("x-kobo-sync", "continue")
@@ -276,7 +292,7 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info("kobo sync", "user", u.Username, "items", len(items),
 		"books", len(books), "shelves", len(shelves), "states", len(states),
-		"continue", contSync)
+		"from_kobo_store", storeItems, "continue", contSync)
 }
 
 // ensureKepub queues a conversion if the book has an EPUB but no KEPUB yet.

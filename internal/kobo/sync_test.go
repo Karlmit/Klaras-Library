@@ -35,6 +35,16 @@ type fixture struct {
 }
 
 func newFixture(t *testing.T, shelfBooks int) *fixture {
+	return newFixtureOpts(t, shelfBooks, false)
+}
+
+// newFixtureWithProxy enables store proxying. The test environment cannot reach
+// storeapi.kobo.com, which is exactly the failure being exercised.
+func newFixtureWithProxy(t *testing.T, shelfBooks int) *fixture {
+	return newFixtureOpts(t, shelfBooks, true)
+}
+
+func newFixtureOpts(t *testing.T, shelfBooks int, proxyStore bool) *fixture {
 	t.Helper()
 	dsn := testdb.For(t, os.Getenv("KLARAS_TEST_DATABASE_URL"), "kobo")
 	ctx := context.Background()
@@ -120,7 +130,7 @@ func newFixture(t *testing.T, shelfBooks int) *fixture {
 		Covers:      covers.New(libRoot, cacheDir),
 		Queue:       jobs.New(db.Pool, log),
 		LibraryRoot: libRoot, ExternalURL: "https://library.example.com",
-		SyncLimit: 10, Log: log,
+		SyncLimit: 10, ProxyStore: proxyStore, Log: log,
 	}).Routes(r)
 
 	f.srv = httptest.NewServer(r)
@@ -418,5 +428,31 @@ func TestDownloadURLsAreAbsoluteHTTPS(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Error("no download URLs were produced at all")
+	}
+}
+
+// TestStoreProxyFailureDoesNotBreakLocalSync is the safety property behind
+// KLARAS_KOBO_PROXY_STORE.
+//
+// With proxying on, every sync makes an outbound call to Kobo. Kobo being slow,
+// down, or unreachable from the server must cost nothing but a short delay --
+// the library is the part that has to work.
+func TestStoreProxyFailureDoesNotBreakLocalSync(t *testing.T) {
+	f := newFixtureWithProxy(t, 4)
+
+	items, token, _ := f.sync("")
+	if n := countKinds(items)["NewEntitlement"]; n != 4 {
+		t.Errorf("got %d books with the store unreachable, want 4: %v",
+			n, countKinds(items))
+	}
+	if token == "" {
+		t.Error("no sync token issued when the store was unreachable")
+	}
+
+	// And it must still converge.
+	items, _, _ = f.sync(token)
+	if len(items) != 0 {
+		t.Errorf("second sync returned %d entities; the store failure broke convergence",
+			len(items))
 	}
 }
