@@ -103,12 +103,15 @@ func (c *Config) LogPreflight(log *slog.Logger) bool {
 			"PERMISSIONS PROBLEM: covers and KEPUB conversion will not work.",
 			"The container runs as the uid from the compose 'user:' setting (99:100 on Unraid).",
 			"Docker creates a missing bind-mount directory owned by root, which that uid cannot write.",
-			"Fix it on the host and restart the container:",
-			"    mkdir -p " + c.CacheDir,
-			"    chown -R 99:100 " + c.CacheDir,
-			"Change ONLY the directories listed above. In particular do not chown the",
-			"parent appdata folder: that would also change the Postgres data directory,",
-			"which must stay owned by uid 70, and Postgres refuses to start without it.",
+			"Fix it on the HOST, not inside the container. In your compose file, find",
+			"the host directory mapped to " + c.CacheDir + " -- on Unraid that is usually",
+			"/mnt/user/appdata/klaras-library/cache -- then run:",
+			"    mkdir -p  <that host directory>",
+			"    chown -R 99:100  <that host directory>",
+			"and restart the container.",
+			"Change ONLY that directory. Do not chown its parent appdata folder: that",
+			"also holds the Postgres data directory, which must stay owned by uid 70,",
+			"and Postgres will not start without it.",
 		} {
 			log.Error(line)
 		}
