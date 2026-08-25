@@ -271,10 +271,28 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 	tok := SyncTokenFromRequest(r)
 	ctx := r.Context()
 
-	// Anything announced up to the watermark the device is sending back has
+	// Anything announced against the watermark the device is sending back has
 	// demonstrably reached it. Do this before the watermark is advanced below.
 	if err := h.engine.confirmDelivered(ctx, u.ID, tok.BooksLastModified); err != nil {
 		h.log.Error("kobo sync: confirm delivered", "err", err, "user", u.ID)
+	}
+
+	// With nothing confirmed, disregard the token and start the stream over.
+	//
+	// This is calibre-web's mechanism and it is what makes "forget what this
+	// device has been told" actually work: without it, clearing the record
+	// changes how books are described but not whether they are offered at all,
+	// because the device's watermark is still past them. A device that has
+	// genuinely received nothing has nothing to lose by being told everything.
+	if n, err := h.engine.confirmedCount(ctx, u.ID); err != nil {
+		h.log.Error("kobo sync: confirmed count", "err", err, "user", u.ID)
+	} else if n == 0 && !tok.BooksLastModified.Equal(epoch) {
+		h.log.Info("kobo sync: nothing confirmed on this account, resending everything",
+			"user", u.Username)
+		tok.BooksLastModified = epoch
+		tok.BooksLastCreated = epoch
+		tok.ReadingStateLastModified = epoch
+		tok.TagsLastModified = epoch
 	}
 
 	items := make([]any, 0, h.syncLimit)

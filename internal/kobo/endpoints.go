@@ -270,6 +270,16 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 	// ServeContent handles range requests, which the device uses to resume an
 	// interrupted download over a flaky wifi link.
 	http.ServeContent(w, r, name, st.ModTime(), f)
+
+	// Fetching the file is the only hard evidence we ever get that the device
+	// actually holds a book. A sync token proves it read a response, which is
+	// weaker: it acknowledged the ChangedEntitlements that left Klara's
+	// collection empty. Recorded after serving so a failed transfer does not
+	// count, and best-effort because the bytes are already on their way.
+	if err := h.engine.confirmDownloaded(context.WithoutCancel(r.Context()),
+		userOf(r).ID, bookID); err != nil {
+		h.log.Warn("kobo download: confirm", "book", bookID, "err", err)
+	}
 }
 
 // handleImage serves a cover at whatever size the device asked for.

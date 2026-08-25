@@ -79,7 +79,19 @@ func (e *Engine) changedBooks(ctx context.Context, userID int64, since time.Time
 		                              AND ks.confirmed
 		LEFT JOIN kobo_archived ka     ON ka.book_id = b.id AND ka.user_id = $1
 		WHERE ka.book_id IS NULL
-		  AND GREATEST(b.updated_at, sy.added_at) > $2
+		  AND (
+		        -- Moved since the device last checked in.
+		        GREATEST(b.updated_at, sy.added_at) > $2
+		        -- Or the device has never confirmed holding it, whatever its
+		        -- watermark says. A watermark only records how far the device
+		        -- has read; it is not evidence that a book arrived. Once the
+		        -- watermark passes a book, a timestamp filter alone can never
+		        -- offer it again -- so a book missed for any reason stays
+		        -- missing for ever, and sync keeps reporting success. This is
+		        -- self-limiting: the row is confirmed as soon as the device
+		        -- acknowledges it, and the set is the size of a shelf.
+		        OR ks.book_id IS NULL
+		      )
 		ORDER BY GREATEST(b.updated_at, sy.added_at), b.id
 		LIMIT $3`, userID, since, limit+1)
 	if err != nil {
@@ -167,19 +179,51 @@ func (e *Engine) markSynced(ctx context.Context, userID int64, ids []int64, wate
 
 // confirmDelivered promotes announcements the device has acknowledged.
 //
-// The acknowledgement is the sync token itself. The device only sends back a
-// watermark it has stored, so a request carrying one at or past the watermark a
-// book was announced with is proof that response was received and kept. Books
-// announced later, or announced to nobody because the response never arrived,
-// stay unconfirmed and are announced again as new.
+// The acknowledgement is the sync token. A device only ever sends back a
+// watermark it has stored, and we set that watermark to the exact instant a
+// response was issued, so a request carrying that value came from a device that
+// read that response.
+//
+// The match is exact rather than "at or past" on purpose. A device's watermark
+// can be at or past a book for reasons that have nothing to do with that book
+// arriving -- including a request someone made on the device's behalf while
+// debugging, which is precisely how this library got into the state that needed
+// fixing. Equality ties the acknowledgement to one specific response.
+//
+// This is the weaker of the two signals: it proves the device read a response,
+// not that it kept the books in it. See confirmDownloaded.
 func (e *Engine) confirmDelivered(ctx context.Context, userID int64, watermark time.Time) error {
 	_, err := e.pool.Exec(ctx, `
 		UPDATE kobo_synced_books
 		SET confirmed = true
 		WHERE user_id = $1
 		  AND NOT confirmed
-		  AND announced_watermark IS NOT NULL
-		  AND announced_watermark <= $2`, userID, watermark)
+		  AND announced_watermark = $2`, userID, watermark)
+	return err
+}
+
+// confirmedCount is how many books this user's devices are known to hold.
+func (e *Engine) confirmedCount(ctx context.Context, userID int64) (int64, error) {
+	var n int64
+	err := e.pool.QueryRow(ctx, `
+		SELECT count(*) FROM kobo_synced_books
+		WHERE user_id = $1 AND confirmed`, userID).Scan(&n)
+	return n, err
+}
+
+// confirmDownloaded records that the device fetched a book's file.
+//
+// This is the strong signal, and the only one that means what the column says.
+// It also self-heals: an unconfirmed book is announced as new, the device
+// downloads it, and it goes quiet -- so a shelf converges on correct even after
+// the sync state has been corrupted.
+func (e *Engine) confirmDownloaded(ctx context.Context, userID, bookID int64) error {
+	_, err := e.pool.Exec(ctx, `
+		INSERT INTO kobo_synced_books
+		       (user_id, book_id, first_synced_at, last_synced_at, confirmed)
+		VALUES ($1, $2, now(), now(), true)
+		ON CONFLICT (user_id, book_id) DO UPDATE
+		SET confirmed = true, last_synced_at = now()`, userID, bookID)
 	return err
 }
 

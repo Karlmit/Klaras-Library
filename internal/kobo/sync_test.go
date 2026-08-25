@@ -731,3 +731,172 @@ func TestUnacknowledgedSyncIsReannounced(t *testing.T) {
 		t.Errorf("after acknowledgement got %v, want 3 ChangedEntitlement and 0 NewEntitlement", kinds)
 	}
 }
+
+// TestWatermarkPastUndeliveredBooksStillAnnounces reproduces the state Klara's
+// Kobo was left in, and is the reason a watermark alone cannot be trusted.
+//
+// Her device had read to the end of the stream and stored the token, so its
+// watermark was past every book on the shelf. But those books had been
+// announced as ChangedEntitlement -- "you already own this, here is fresh
+// metadata" -- so it acknowledged them and downloaded nothing. Acknowledging a
+// response is not the same as holding the books in it.
+//
+// Filtering on the watermark alone then makes the loss permanent: the device
+// asks "anything since X?", the honest answer is "no", and sync reports success
+// for ever while the collection stays empty. Anything the device has not
+// confirmed holding is offered regardless of the watermark.
+//
+// The legacy rows here are exactly what migration 00013 leaves behind: present,
+// unconfirmed, and with no record of the watermark they went out with.
+func TestWatermarkPastUndeliveredBooksStillAnnounces(t *testing.T) {
+	f := newFixture(t, 3)
+
+	_, token, _ := f.sync("")
+	if token == "" {
+		t.Fatal("no sync token issued")
+	}
+
+	// Rewrite history into the pre-00013 shape: announced, never proven
+	// delivered, no watermark recorded.
+	if _, err := f.pool.Exec(context.Background(), `
+		UPDATE kobo_synced_books
+		SET confirmed = false, announced_watermark = NULL
+		WHERE user_id = $1`, f.user); err != nil {
+		t.Fatal(err)
+	}
+
+	// The device asks from a watermark that is past all three books.
+	items, token2, _ := f.sync(token)
+	kinds := countKinds(items)
+	if kinds["NewEntitlement"] != 3 {
+		t.Fatalf("got %v, want 3 NewEntitlement: a book the device never "+
+			"confirmed holding must be offered even when its watermark is "+
+			"past it, or it can never arrive", kinds)
+	}
+
+	// That response did land, and the device says so by coming back with the
+	// token from it. Only then does the shelf go quiet.
+	items, _, _ = f.sync(token2)
+	if n := len(items); n != 0 {
+		t.Errorf("confirmed shelf resent %d items, want 0: %v", n, countKinds(items))
+	}
+}
+
+// TestDownloadConfirmsDelivery pins the strong signal.
+//
+// Fetching the file is the only hard evidence that the device holds a book. A
+// shelf must therefore converge on quiet even if its sync state was corrupted:
+// unconfirmed books are announced as new, the device downloads them, and they
+// stop being announced.
+func TestDownloadConfirmsDelivery(t *testing.T) {
+	f := newFixture(t, 2)
+
+	items, _, _ := f.sync("")
+	if got := countKinds(items)["NewEntitlement"]; got != 2 {
+		t.Fatalf("first sync sent %d NewEntitlement, want 2", got)
+	}
+
+	// The device never acknowledges the sync, so the token cannot confirm
+	// anything -- but it does fetch both files. Only the shelf's own books:
+	// the fixture creates more, off the shelf, to catch scope errors.
+	for _, id := range f.books[:2] {
+		res, err := http.Get(fmt.Sprintf("%s/kobo/%s/download/%d/epub", f.srv.URL, f.token, id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || len(body) == 0 {
+			t.Fatalf("download of %d returned %d, %d bytes", id, res.StatusCode, len(body))
+		}
+	}
+
+	// Asking again from the beginning: it holds them, so they are changes now,
+	// not new books.
+	items, _, _ = f.sync("")
+	kinds := countKinds(items)
+	if kinds["NewEntitlement"] != 0 || kinds["ChangedEntitlement"] != 2 {
+		t.Errorf("after downloading got %v, want 0 NewEntitlement and 2 ChangedEntitlement", kinds)
+	}
+}
+
+// TestForeignWatermarkCannotConfirm guards the mistake that corrupted this
+// library's sync state.
+//
+// A request made on the device's behalf -- a diagnostic curl, a replayed
+// response -- announces books against a watermark the device never saw. If
+// confirmation accepted any watermark at or past that one, the device's own
+// next token would silently confirm books it had never been sent, and they
+// could never be offered again.
+func TestForeignWatermarkCannotConfirm(t *testing.T) {
+	f := newFixture(t, 2)
+
+	// Someone else pulls a full sync. The books are now announced, against a
+	// watermark only that response carried.
+	if got := countKinds(mustItems(f.sync("")))["NewEntitlement"]; got != 2 {
+		t.Fatalf("setup sync sent %d NewEntitlement, want 2", got)
+	}
+
+	// The device arrives with a watermark of its own, well past the books.
+	future := base64Token(t, time.Now().Add(24*time.Hour))
+	items, _, _ := f.sync(future)
+	if got := countKinds(items)["NewEntitlement"]; got != 2 {
+		t.Errorf("got %v, want 2 NewEntitlement: a watermark the device did not "+
+			"get from us must not confirm anything", countKinds(items))
+	}
+}
+
+func mustItems(items []map[string]json.RawMessage, _ string, _ bool) []map[string]json.RawMessage {
+	return items
+}
+
+// base64Token builds a sync token carrying an arbitrary watermark.
+func base64Token(t *testing.T, at time.Time) string {
+	t.Helper()
+	tok := kobo.NewSyncToken()
+	tok.BooksLastModified = at
+	tok.BooksLastCreated = at
+	tok.TagsLastModified = at
+	tok.ReadingStateLastModified = at
+	h := http.Header{}
+	tok.WriteHeader(h)
+	for k, v := range h {
+		if strings.EqualFold(k, kobo.SyncTokenHeader) {
+			return v[0]
+		}
+	}
+	t.Fatal("no token written")
+	return ""
+}
+
+// TestResyncIgnoresTheDeviceWatermark covers the "forget what this device has
+// been told" path, which is calibre-web's force-full-sync mechanism.
+//
+// Clearing the record is not enough on its own: the device's watermark is still
+// past every book, so a timestamp filter would offer none of them and the
+// operator would see a resync that changed nothing. With nothing confirmed
+// there is nothing to lose, so the token is disregarded and the stream starts
+// over.
+func TestResyncIgnoresTheDeviceWatermark(t *testing.T) {
+	f := newFixture(t, 3)
+
+	_, token, _ := f.sync("")
+	// The device confirms, so the shelf is quiet.
+	_, token2, _ := f.sync(token)
+	if items, _, _ := f.sync(token2); len(items) != 0 {
+		t.Fatalf("shelf not quiet before the resync: %v", countKinds(items))
+	}
+
+	// The operator runs kobo-resync.
+	if _, err := f.pool.Exec(context.Background(),
+		`DELETE FROM kobo_synced_books WHERE user_id=$1`, f.user); err != nil {
+		t.Fatal(err)
+	}
+
+	// The device asks again with the very same token it has always used.
+	items, _, _ := f.sync(token2)
+	if got := countKinds(items)["NewEntitlement"]; got != 3 {
+		t.Errorf("after a resync got %v, want 3 NewEntitlement: clearing the "+
+			"record must actually resend the books", countKinds(items))
+	}
+}
