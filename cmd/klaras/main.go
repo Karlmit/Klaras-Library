@@ -71,6 +71,8 @@ func run() error {
 		return cmdUsers()
 	case "passwd":
 		return cmdPasswd()
+	case "kobo-resync":
+		return cmdKoboResync()
 	case "version":
 		fmt.Println("klaras", version)
 		return nil
@@ -101,6 +103,9 @@ Usage:
                           Undo file moves made since TIME, using the journal
   klaras users            List accounts
   klaras passwd USERNAME  Set an account's password
+  klaras kobo-resync USERNAME
+                          Forget what a user's devices have been sent, so the
+                          next sync re-announces every book as new
   klaras doctor           Check the library for problems (read-only)
   klaras dev-seed --books N
                           Replace the library with N synthetic books, for
@@ -752,6 +757,64 @@ func splitPositional(args []string) (positional string, rest []string) {
 		rest = append(rest, a)
 	}
 	return positional, rest
+}
+
+// cmdKoboResync clears the record of what a user's devices have been told.
+//
+// The sync protocol distinguishes NewEntitlement from ChangedEntitlement, and
+// gets it right by remembering what was already sent. When that record and the
+// device disagree -- a device restored from backup, a factory reset, or a
+// diagnostic sync run by someone else -- the device is told a book "changed"
+// that it has never seen, and may simply ignore it. Forgetting is the safe
+// direction: a book announced as new that the device already holds is at worst
+// a redundant download.
+func cmdKoboResync() error {
+	fs := flag.NewFlagSet("kobo-resync", flag.ExitOnError)
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: klaras kobo-resync USERNAME")
+	}
+	username := fs.Arg(0)
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg)
+	ctx := context.Background()
+
+	db, err := store.Open(ctx, cfg.DatabaseURL, cfg.DBMaxConns, log)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	var userID int64
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT id FROM users WHERE lower(username)=lower($1)`, username).Scan(&userID); err != nil {
+		return fmt.Errorf("no account called %q (try: klaras users)", username)
+	}
+
+	tag, err := db.Pool.Exec(ctx,
+		`DELETE FROM kobo_synced_books WHERE user_id=$1`, userID)
+	if err != nil {
+		return err
+	}
+	// Touch the synced shelves so the next request also re-sends the
+	// collections, not just the books.
+	if _, err := db.Pool.Exec(ctx,
+		`UPDATE shelves SET updated_at = now() WHERE user_id=$1 AND kobo_sync`, userID); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr,
+		"Forgot %d book(s) for %s.\n"+
+			"The next sync will announce every book on their Kobo shelves as new.\n"+
+			"On the device, sync again -- it may take a little longer than usual.\n",
+		tag.RowsAffected(), username)
+	return nil
 }
 
 func cmdDoctor() error {
