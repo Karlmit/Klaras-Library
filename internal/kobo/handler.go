@@ -87,6 +87,16 @@ const (
 // appends its own paths to it.
 func (h *Handler) Routes(r chi.Router) {
 	r.Route("/kobo/{token}", func(r chi.Router) {
+		// Every Kobo request is logged at info, not debug.
+		//
+		// A sync is a handful of requests a few times a day, so the volume is
+		// nothing, and this is the one flow that cannot be debugged from the
+		// outside: the device reports "sync failed" with no detail, and its own
+		// logs are awkward to reach. Without this, a server at the default log
+		// level shows only the sync itself and hides the download, cover and
+		// initialization calls around it -- which is where a failure actually
+		// tends to be.
+		r.Use(h.logRequests)
 		r.Use(h.authenticate)
 
 		r.Get("/v1/library/sync", h.handleSync)
@@ -105,6 +115,72 @@ func (h *Handler) Routes(r chi.Router) {
 		// eventually show sync errors.
 		r.HandleFunc("/*", h.handleFallback)
 	})
+}
+
+// logRequests records every Kobo call, including the ones that fail.
+func (h *Handler) logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+
+		// The token is a bearer credential, so it is reduced to a short prefix:
+		// enough to tell devices apart in a log, useless to anyone who reads it.
+		tok := chi.URLParam(r, "token")
+		short := tok
+		if len(short) > 8 {
+			short = short[:8] + "..."
+		}
+		path := r.URL.Path
+		if tok != "" {
+			path = strings.Replace(path, tok, short, 1)
+		}
+
+		next.ServeHTTP(rec, r)
+
+		attrs := []any{
+			"method", r.Method,
+			"path", path,
+			"status", rec.status,
+			"bytes", rec.written,
+			"dur_ms", float64(time.Since(start).Microseconds()) / 1000,
+			"device", short,
+		}
+		if rec.status >= 400 {
+			h.log.Warn("kobo request failed", attrs...)
+		} else {
+			h.log.Info("kobo request", attrs...)
+		}
+	})
+}
+
+// statusRecorder captures what was actually sent back.
+type statusRecorder struct {
+	http.ResponseWriter
+	status  int
+	written int64
+	wrote   bool
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	if !s.wrote {
+		s.status, s.wrote = code, true
+	}
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusRecorder) Write(b []byte) (int, error) {
+	s.wrote = true
+	n, err := s.ResponseWriter.Write(b)
+	s.written += int64(n)
+	return n, err
+}
+
+// Flush and ReadFrom are forwarded so http.ServeContent keeps its fast paths
+// for range requests and large book downloads.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // authenticate resolves the URL token to a user.
