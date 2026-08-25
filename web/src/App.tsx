@@ -13,6 +13,7 @@ import { BrandMark } from './components/Brand'
 import { Sidebar } from './components/Sidebar'
 import { BookGrid } from './components/BookGrid'
 import { BookDetail } from './components/BookDetail'
+import { Settings } from './components/Settings'
 
 const SORTS: { value: string; label: string }[] = [
   { value: 'title', label: 'Title A–Ö' },
@@ -30,7 +31,8 @@ export function App() {
   const [editing, setEditing] = useState<number | null>(null)
   const [reading, setReading] = useState<{ id: number; title: string; format: string } | null>(null)
   const [picked, setPicked] = useState<Set<number>>(new Set())
-  const [, setLastPicked] = useState<number | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [lastPicked, setLastPicked] = useState<number | null>(null)
   const [count, setCount] = useState<number | undefined>()
   const [query, setQuery] = useState<BookQuery>({ sort: 'title' })
   const [searchInput, setSearchInput] = useState('')
@@ -68,19 +70,42 @@ export function App() {
     // A changed filter invalidates the selection: keeping ids the user can no
     // longer see would make the next bulk action a surprise.
     setPicked(new Set())
+    setLastPicked(null)
   }, [])
 
-  const togglePick = useCallback((id: number, shiftKey: boolean) => {
-    setPicked((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-    if (!shiftKey) setLastPicked(id)
-  }, [])
+  const togglePick = useCallback(
+    (id: number, shiftKey: boolean, visible: number[]) => {
+      setPicked((prev) => {
+        const next = new Set(prev)
 
-  const clearPicked = useCallback(() => setPicked(new Set()), [])
+        // Shift extends from the last plain click to here, following the order
+        // currently on screen rather than book ids -- the range someone means
+        // is the one they can see.
+        if (shiftKey && lastPicked != null && lastPicked !== id) {
+          const from = visible.indexOf(lastPicked)
+          const to = visible.indexOf(id)
+          if (from !== -1 && to !== -1) {
+            const [lo, hi] = from < to ? [from, to] : [to, from]
+            for (let i = lo; i <= hi; i++) next.add(visible[i]!)
+            return next
+          }
+        }
+
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
+      })
+      // A shift-click extends the existing anchor rather than moving it, so a
+      // second shift-click can grow or shrink the same range.
+      if (!shiftKey) setLastPicked(id)
+    },
+    [lastPicked],
+  )
+
+  const clearPicked = useCallback(() => {
+    setPicked(new Set())
+    setLastPicked(null)
+  }, [])
 
   const activeChips = useMemo(() => {
     const chips: { key: keyof BookQuery; label: string; value: string }[] = []
@@ -113,6 +138,16 @@ export function App() {
     )
   }
 
+  if (settingsOpen) {
+    return (
+      <Settings
+        user={user}
+        onClose={() => setSettingsOpen(false)}
+        onBrowseShelf={(id) => patchQuery({ shelf: id })}
+      />
+    )
+  }
+
   return (
     <div className="app">
       <div className="brand">
@@ -140,6 +175,13 @@ export function App() {
         </div>
         <div className="topbar__spacer" />
         <div className="usermenu">
+          <button
+            className="btn btn--ghost btn--sm"
+            onClick={() => setSettingsOpen(true)}
+            title="Kobo devices, shelves, users"
+          >
+            Settings
+          </button>
           <span className="usermenu__name">{user.username}</span>
           <button
             className="btn btn--ghost btn--sm"

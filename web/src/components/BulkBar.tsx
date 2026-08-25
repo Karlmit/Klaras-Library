@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { editApi, shelvesApi, type BookEdit } from '../api'
+import { deleteApi, editApi, shelvesApi, type BookEdit } from '../api'
 
 interface Props {
   selected: Set<number>
@@ -17,7 +17,7 @@ interface Props {
 export function BulkBar({ selected, onClear }: Props) {
   const qc = useQueryClient()
   const ids = [...selected]
-  const [panel, setPanel] = useState<'none' | 'tags' | 'author' | 'shelf'>('none')
+  const [panel, setPanel] = useState<'none' | 'tags' | 'author' | 'shelf' | 'language'>('none')
   const [error, setError] = useState('')
 
   const { data: shelves } = useQuery({ queryKey: ['shelves'], queryFn: shelvesApi.list })
@@ -34,6 +34,12 @@ export function BulkBar({ selected, onClear }: Props) {
   const bulk = useMutation({
     mutationFn: (v: { edit: BookEdit; add?: string[]; remove?: string[] }) =>
       editApi.bulk(ids, v.edit, v.add, v.remove),
+    onSuccess: done,
+    onError: (e) => setError((e as Error).message),
+  })
+
+  const del = useMutation({
+    mutationFn: (keepFiles: boolean) => deleteApi.bulk(ids, keepFiles),
     onSuccess: done,
     onError: (e) => setError((e as Error).message),
   })
@@ -63,12 +69,32 @@ export function BulkBar({ selected, onClear }: Props) {
           <button className="btn btn--sm btn--ghost" onClick={() => setPanel('shelf')}>
             Add to shelf
           </button>
+          <button className="btn btn--sm btn--ghost" onClick={() => setPanel('language')}>
+            Set language
+          </button>
           <button
             className="btn btn--sm btn--ghost"
             onClick={() => bulk.mutate({ edit: { needs_review: false } })}
             title="Clear the review flag on the selected books"
           >
             Mark reviewed
+          </button>
+          <button
+            className="btn btn--sm btn--ghost btn--danger"
+            disabled={del.isPending}
+            onClick={() => {
+              // Typing the count is deliberate friction: this deletes files.
+              const answer = prompt(
+                `Delete ${ids.length} book${ids.length > 1 ? 's' : ''} and their files ` +
+                  `from disk? This cannot be undone.\n\n` +
+                  `Type ${ids.length} to confirm.`,
+              )
+              if (answer !== null && answer.trim() === String(ids.length)) {
+                del.mutate(false)
+              }
+            }}
+          >
+            {del.isPending ? 'Deleting…' : 'Delete'}
           </button>
         </>
       )}
@@ -89,6 +115,16 @@ export function BulkBar({ selected, onClear }: Props) {
           busy={bulk.isPending}
           onCancel={() => setPanel('none')}
           onSubmit={(v) => bulk.mutate({ edit: { authors: [v] } })}
+        />
+      )}
+
+      {panel === 'language' && (
+        <InlineForm
+          label="Language code"
+          hint="ISO 639-2: swe, eng, dan, nor, deu…"
+          busy={bulk.isPending}
+          onCancel={() => setPanel('none')}
+          onSubmit={(v) => bulk.mutate({ edit: { languages: [v.toLowerCase()] } })}
         />
       )}
 

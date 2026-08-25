@@ -161,6 +161,8 @@ func (s *Server) routes() {
 				r.Patch("/books/{id}", s.handleUpdateBook)
 				r.Post("/books/bulk", s.handleBulkUpdate)
 				r.Get("/metadata/search", s.handleMetadataSearch)
+				r.Delete("/books/{id}", s.handleDeleteBook)
+				r.Post("/books/bulk-delete", s.handleBulkDelete)
 			})
 
 			// Account administration.
@@ -200,9 +202,23 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
+		// blob: is allowed for framing, images, fonts and media, but deliberately
+		// NOT for script-src. The in-browser reader hands epub.js the book as a
+		// blob and it renders into a blob: iframe; without frame-src the reader
+		// silently hangs on "Opening...". Book content can therefore be
+		// displayed but never executed, and epub.js additionally sandboxes the
+		// iframe against scripting by default.
 		h.Set("Content-Security-Policy",
-			"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "+
-				"script-src 'self'; font-src 'self'; connect-src 'self'; "+
+			"default-src 'self'; "+
+				"img-src 'self' data: blob:; "+
+				"style-src 'self' 'unsafe-inline'; "+
+				"script-src 'self'; "+
+				"font-src 'self' data: blob:; "+
+				"media-src 'self' blob:; "+
+				"connect-src 'self' blob:; "+
+				"frame-src 'self' blob:; "+
+				"child-src 'self' blob:; "+
+				"worker-src 'self' blob:; "+
 				"frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 		next.ServeHTTP(w, r)
 	})

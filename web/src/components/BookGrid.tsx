@@ -8,7 +8,9 @@ interface Props {
   onSelect: (id: number) => void
   onCount: (n: number | undefined) => void
   selected: Set<number>
-  onToggleSelect: (id: number, shiftKey: boolean) => void
+  // The visible ids are passed along so a shift-click can select the range
+  // between the last click and this one, in whatever order is on screen.
+  onToggleSelect: (id: number, shiftKey: boolean, visible: number[]) => void
 }
 
 const ROW_GAP = 20
@@ -36,6 +38,7 @@ export function BookGrid({ query, onSelect, onCount, selected, onToggleSelect }:
     () => data?.pages.flatMap((p) => p.items) ?? [],
     [data],
   )
+  const visibleIds = useMemo(() => books.map((b) => b.id), [books])
   const total = data?.pages[0]?.total
 
   useEffect(() => {
@@ -129,7 +132,7 @@ export function BookGrid({ query, onSelect, onCount, selected, onToggleSelect }:
                     book={b}
                     onSelect={onSelect}
                     isSelected={selected.has(b.id)}
-                    onToggleSelect={onToggleSelect}
+                    onToggleSelect={(id, shift) => onToggleSelect(id, shift, visibleIds)}
                   />
                 ))}
               </div>

@@ -28,56 +28,76 @@ export function Reader({ bookId, title, format, onClose }: Props) {
     const host = hostRef.current
     if (!host) return
 
-    let cancelled = false
-    const book = ePub(downloadUrl(bookId, format))
-    const rendition = book.renderTo(host, {
-      width: '100%',
-      height: '100%',
-      spread: 'auto',
-    })
-    renditionRef.current = rendition
-
-    let saved: string | null = null
-    try {
-      saved = localStorage.getItem(storageKey)
-    } catch {
-      // Private browsing, or storage disabled. Start from the beginning.
+    // Declared up front: the async body below registers it on the rendition,
+    // and the cleanup removes it.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight') void renditionRef.current?.next()
+      if (e.key === 'ArrowLeft') void renditionRef.current?.prev()
+      if (e.key === 'Escape') onClose()
     }
+    // epub.js renders into an iframe, which swallows key events of its own,
+    // so the rendition gets its own listener as well as the window.
+    window.addEventListener('keydown', onKey)
 
-    rendition
-      .display(saved ?? undefined)
-      .then(() => {
+    let cancelled = false
+    let book: ReturnType<typeof ePub> | null = null
+    let rendition: Rendition | null = null
+
+    // Fetch the archive ourselves and hand epub.js the bytes.
+    //
+    // Passing the URL instead makes epub.js guess how to open it from the file
+    // extension, and our download route ends in "/epub" rather than ".epub".
+    // It concluded the book was an unpacked directory and started requesting
+    // "download/META-INF/container.xml", which 404s and leaves the reader
+    // stuck on "Opening...".
+    ;(async () => {
+      try {
+        const res = await fetch(downloadUrl(bookId, format))
+        if (!res.ok) {
+          throw new Error(
+            res.status === 404
+              ? 'This book has no EPUB file on disk.'
+              : `The server returned ${res.status}.`,
+          )
+        }
+        const buf = await res.arrayBuffer()
+        if (cancelled) return
+
+        book = ePub(buf)
+        rendition = book.renderTo(host, { width: '100%', height: '100%', spread: 'auto' })
+        renditionRef.current = rendition
+
+        let saved: string | null = null
+        try {
+          saved = localStorage.getItem(storageKey)
+        } catch {
+          // Private browsing, or storage disabled. Start from the beginning.
+        }
+
+        rendition.on('relocated', (location: { start: { cfi: string } }) => {
+          try {
+            localStorage.setItem(storageKey, location.start.cfi)
+          } catch {
+            // The reader still works; it just will not resume next time.
+          }
+        })
+        rendition.on('keyup', onKey)
+
+        await rendition.display(saved ?? undefined)
         if (!cancelled) setLoading(false)
-      })
-      .catch((e: unknown) => {
+      } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : 'Could not open this book')
           setLoading(false)
         }
-      })
-
-    rendition.on('relocated', (location: { start: { cfi: string } }) => {
-      try {
-        localStorage.setItem(storageKey, location.start.cfi)
-      } catch {
-        // Nothing to do; the reader still works, it just will not resume.
       }
-    })
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight') void rendition.next()
-      if (e.key === 'ArrowLeft') void rendition.prev()
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    // epub.js renders into an iframe, which swallows key events of its own.
-    rendition.on('keyup', onKey)
+    })()
 
     return () => {
       cancelled = true
       window.removeEventListener('keydown', onKey)
-      rendition.destroy()
-      book.destroy()
+      rendition?.destroy()
+      book?.destroy()
     }
   }, [bookId, format, onClose, storageKey])
 

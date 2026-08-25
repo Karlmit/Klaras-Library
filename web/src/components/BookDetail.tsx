@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { api, coverUrl } from '../api'
+import { useEffect, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api, coverUrl, deleteApi } from '../api'
+import { AddToShelf } from './AddToShelf'
 
 interface Props {
   bookId: number
@@ -22,9 +23,20 @@ const REVIEW_REASONS: Record<string, string> = {
 }
 
 export function BookDetail({ bookId, onClose, onFilter, onEdit, onRead, canEdit }: Props) {
+  const [shelfOpen, setShelfOpen] = useState(false)
+  const qc = useQueryClient()
   const { data: book, isLoading } = useQuery({
     queryKey: ['book', bookId],
     queryFn: () => api.book(bookId),
+  })
+
+  const del = useMutation({
+    mutationFn: () => deleteApi.one(bookId, false),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['books'] })
+      void qc.invalidateQueries({ queryKey: ['facets'] })
+      onClose()
+    },
   })
 
   // Escape closes the drawer, which is what every drawer everywhere does.
@@ -117,6 +129,13 @@ export function BookDetail({ bookId, onClose, onFilter, onEdit, onRead, canEdit 
                       Edit
                     </button>
                   )}
+                  <button
+                    className="btn btn--ghost btn--sm"
+                    style={{ marginRight: 6, marginBottom: 6 }}
+                    onClick={() => setShelfOpen((v) => !v)}
+                  >
+                    {shelfOpen ? 'Cancel' : 'Add to shelf'}
+                  </button>
                   {book.files.map((f) => (
                     <a
                       key={f.format}
@@ -130,6 +149,36 @@ export function BookDetail({ bookId, onClose, onFilter, onEdit, onRead, canEdit 
                 </div>
               </div>
             </div>
+
+            {shelfOpen && (
+              <AddToShelf bookId={book.id} onDone={() => setShelfOpen(false)} />
+            )}
+
+            {canEdit && (
+              <div style={{ marginTop: 10 }}>
+                <button
+                  className="btn btn--ghost btn--sm btn--danger"
+                  disabled={del.isPending}
+                  onClick={() => {
+                    if (
+                      confirm(
+                        `Delete "${book.title}" and its files from disk?\n\n` +
+                          'This cannot be undone.',
+                      )
+                    ) {
+                      del.mutate()
+                    }
+                  }}
+                >
+                  {del.isPending ? 'Deleting…' : 'Delete this book'}
+                </button>
+                {del.isError && (
+                  <div className="error" style={{ marginTop: 8 }}>
+                    {(del.error as Error).message}
+                  </div>
+                )}
+              </div>
+            )}
 
             <dl className="kv">
               {book.publisher && (

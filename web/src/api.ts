@@ -257,3 +257,42 @@ export const koboApi = {
 
 export const downloadUrl = (id: number, format: string) =>
   `/api/books/${id}/download/${format.toLowerCase()}`
+
+export interface UserSummary {
+  id: number
+  username: string
+  email?: string
+  role: 'admin' | 'editor' | 'reader'
+  is_active: boolean
+  needs_password: boolean
+  shelves: number
+  kobo_tokens: number
+  created_at: string
+}
+
+export const usersApi = {
+  list: () => req<{ users: UserSummary[] }>('/api/users'),
+
+  update: (id: number, patch: { role?: string; is_active?: boolean }) =>
+    req<unknown>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+
+  setPassword: (id: number, password: string) =>
+    req<unknown>(`/api/users/${id}/password`, {
+      method: 'PUT',
+      body: JSON.stringify({ password }),
+    }),
+}
+
+export const deleteApi = {
+  one: (id: number, keepFiles = false) =>
+    req<{ files_removed: number; directory_removed: boolean }>(
+      `/api/books/${id}${keepFiles ? '?keep_files=1' : ''}`,
+      { method: 'DELETE' },
+    ),
+
+  bulk: (ids: number[], keepFiles = false) =>
+    req<{ deleted: number; failed: number; files_removed: number }>('/api/books/bulk-delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids, keep_files: keepFiles }),
+    }),
+}

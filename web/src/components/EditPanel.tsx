@@ -140,6 +140,33 @@ export function EditPanel({ bookId, onClose }: Props) {
               />
             </Field>
           </div>
+          <Field label="Languages (comma separated, three-letter codes)">
+            <input
+              value={(form.languages ?? []).join(', ')}
+              onChange={(e) =>
+                set(
+                  'languages',
+                  e.target.value.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+                )
+              }
+              placeholder="swe, eng"
+            />
+            <p className="hint" style={{ margin: '4px 0 0' }}>
+              ISO 639-2 codes: swe, eng, dan, nor, deu, fra, ara. These are what the
+              Languages filter groups by, and what a Kobo is told about the book.
+            </p>
+          </Field>
+
+          <Field label="Rating (0–10, half stars)">
+            <input
+              type="number" min={0} max={10} step={1}
+              value={form.rating ?? ''}
+              onChange={(e) =>
+                set('rating', e.target.value === '' ? undefined : Number(e.target.value))
+              }
+            />
+          </Field>
+
           <Field label="Categories (comma separated)">
             <input
               value={(form.tags ?? []).join(', ')}

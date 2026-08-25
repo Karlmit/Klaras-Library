@@ -495,3 +495,139 @@ select.sort {
     color: var(--text-muted); text-align: center;
     pointer-events: none;
 }
+
+/* ---- settings ------------------------------------------------------------*/
+.settings {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 24px 24px 60px;
+    height: 100%;
+    overflow-y: auto;
+}
+.settings__head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 18px;
+}
+.settings__head h1 {
+    font-family: var(--font-display);
+    font-size: 24px; margin: 0; color: var(--v-800);
+}
+.settings__tabs {
+    display: flex; gap: 2px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 22px;
+}
+.settings__tab {
+    border: 0; background: none; cursor: pointer;
+    padding: 9px 14px;
+    color: var(--text-muted);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    font-weight: 500;
+}
+.settings__tab:hover { color: var(--text); background: var(--v-50); }
+.settings__tab--active {
+    color: var(--v-700);
+    border-bottom-color: var(--accent);
+}
+.settings__body { min-height: 200px; }
+
+/* ---- tables --------------------------------------------------------------*/
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+.table th {
+    text-align: left;
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 9px 12px;
+    background: var(--surface-sunken);
+    border-bottom: 1px solid var(--border);
+}
+.table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+.table tr:last-child td { border-bottom: 0; }
+.table tbody tr:hover { background: var(--v-50); }
+.row--warn { background: #FEF9F0; }
+.table .sub { font-size: 12px; color: var(--text-muted); }
+.table .warn { font-size: 12px; color: var(--warning); }
+
+.badge {
+    display: inline-block;
+    margin-left: 6px; padding: 1px 6px;
+    background: var(--accent-subtle); color: var(--v-800);
+    border-radius: 999px; font-size: 11px;
+}
+
+.switch { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: 13px; }
+.switch input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+.linklike {
+    border: 0; background: none; padding: 0; cursor: pointer;
+    color: var(--accent); font: inherit; text-align: left;
+}
+.linklike:hover { color: var(--accent-hover); text-decoration: underline; }
+
+.btn--danger { color: var(--danger); border-color: #F0C4C4; }
+.btn--danger:hover { background: #FEF2F2; color: #991B1B; }
+
+.hint { font-size: 12.5px; color: var(--text-muted); line-height: 1.55; }
+.warn { font-size: 12.5px; color: var(--warning); }
+
+.callout {
+    background: var(--v-50);
+    border: 1px solid var(--v-200);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    margin-bottom: 18px;
+}
+.callout--warn { background: #FEF9F0; border-color: #F5D9A8; }
+.copyrow {
+    display: flex; gap: 8px; align-items: center;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 7px 10px; margin-top: 8px;
+}
+.copyrow code {
+    flex: 1; font-family: var(--font-mono); font-size: 12px;
+    overflow-x: auto; white-space: nowrap;
+}
+
+.dialog {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(420px, calc(100% - 32px));
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-panel);
+    padding: 22px 24px;
+    z-index: 50;
+}
+
+/* ---- shelf picker --------------------------------------------------------*/
+.shelfpick {
+    display: grid; gap: 4px;
+    margin: 12px 0 4px;
+    padding: 10px;
+    background: var(--v-50);
+    border: 1px solid var(--v-200);
+    border-radius: var(--radius-md);
+}
+.shelfpick__item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    cursor: pointer; text-align: left;
+}
+.shelfpick__item:hover { background: var(--accent-subtle); border-color: var(--v-300); }
+.shelfpick__item .sub { margin-left: auto; color: var(--text-muted); font-size: 12px; }

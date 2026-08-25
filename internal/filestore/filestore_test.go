@@ -488,3 +488,74 @@ func TestRevertRespectsTheSinceBoundary(t *testing.T) {
 		t.Error("a move outside the --since window was undone anyway")
 	}
 }
+
+func TestDeleteBookFilesRemovesTheDirectory(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+
+	dir := filepath.Join(f.root, "Old Author", "Old Title")
+	res, err := f.st.DeleteBookFiles(ctx, f.id, "Old Author/Old Title", []string{"book.epub"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FilesRemoved < 2 {
+		t.Errorf("removed %d files, want the epub and the cover", res.FilesRemoved)
+	}
+	if !res.DirRemoved {
+		t.Error("the empty book directory was left behind")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Error("book directory still exists")
+	}
+	// The author folder had nothing else in it, so it goes too.
+	if _, err := os.Stat(filepath.Join(f.root, "Old Author")); !os.IsNotExist(err) {
+		t.Error("empty author directory was not pruned")
+	}
+	// And the library root itself must survive.
+	if _, err := os.Stat(f.root); err != nil {
+		t.Fatal("the library root was removed")
+	}
+}
+
+// TestDeleteLeavesDirectoriesHoldingOtherFiles is the safety property: a
+// directory the user has put something else into is never removed.
+func TestDeleteLeavesDirectoriesHoldingOtherFiles(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+
+	dir := filepath.Join(f.root, "Old Author", "Old Title")
+	stray := filepath.Join(dir, "notes-i-wrote.txt")
+	if err := os.WriteFile(stray, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := f.st.DeleteBookFiles(ctx, f.id, "Old Author/Old Title", []string{"book.epub"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DirRemoved {
+		t.Error("removed a directory that still held a file the library does not own")
+	}
+	if _, err := os.Stat(stray); err != nil {
+		t.Error("an unrelated file was deleted")
+	}
+}
+
+// TestDeleteIsJournalled: a delete leaves the same audit trail as a move.
+func TestDeleteIsJournalled(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+
+	if _, err := f.st.DeleteBookFiles(ctx, f.id, "Old Author/Old Title", []string{"book.epub"}); err != nil {
+		t.Fatal(err)
+	}
+	var op, state string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT op, state FROM file_operations WHERE book_id=$1 ORDER BY id DESC LIMIT 1`,
+		f.id).Scan(&op, &state); err != nil {
+		t.Fatal(err)
+	}
+	if op != "delete" || state != "done" {
+		t.Errorf("journal shows op=%q state=%q, want delete/done", op, state)
+	}
+}
