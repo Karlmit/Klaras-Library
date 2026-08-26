@@ -40,7 +40,7 @@ export function SettingsUsers({ me }: { me: { id: number } }) {
 
   if (isLoading) return <p>Loading…</p>
 
-  const needing = data?.users.filter((u) => u.needs_password) ?? []
+  const needing = data?.users?.filter((u) => u.needs_password) ?? []
 
   return (
     <div>
@@ -83,7 +83,7 @@ export function SettingsUsers({ me }: { me: { id: number } }) {
           </tr>
         </thead>
         <tbody>
-          {data?.users.map((u) => (
+          {data?.users?.map((u) => (
             <tr key={u.id} className={u.needs_password ? 'row--warn' : undefined}>
               <td>
                 <strong>{u.username}</strong>

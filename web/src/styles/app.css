@@ -1106,3 +1106,32 @@ select.sort {
     .pick__label { grid-column: 2; }
     .pick__vals, .pick__covers { grid-column: 2; }
 }
+
+/* Render-crash fallback. Deliberately plain: it has to render correctly even
+   when whatever broke was a layout component. */
+.crash {
+  max-width: 34rem;
+  margin: 12vh auto;
+  padding: 0 1.5rem;
+  text-align: center;
+}
+.crash h1 { font-size: 1.35rem; margin-bottom: 0.6rem; }
+.crash p { color: var(--text-muted); line-height: 1.55; }
+.crash__what {
+  margin-top: 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--v-50);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.crash__row {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  margin-top: 1.2rem;
+}

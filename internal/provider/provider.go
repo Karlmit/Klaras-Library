@@ -98,7 +98,11 @@ func (s *Set) Search(ctx context.Context, q Query, limit int) []Result {
 		}(p)
 	}
 
-	var all []Result
+	// Non-nil from the start. This value is marshalled straight into a JSON
+	// response, and a nil slice becomes `null`, not `[]` -- which every client
+	// then has to remember to guard. One did not, and a lookup that found
+	// nothing took the whole page down with it.
+	all := []Result{}
 	for range s.providers {
 		o := <-ch
 		if o.err != nil {

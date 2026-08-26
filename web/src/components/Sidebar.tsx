@@ -91,7 +91,7 @@ export function Sidebar({ query, onChange, isAdmin, open = false, account, onDis
         </button>
       )}
 
-      {!!shelves?.shelves.length && (
+      {!!shelves?.shelves?.length && (
         <>
           <div className="navhead">Shelves</div>
           {shelves.shelves.map((sh) => (

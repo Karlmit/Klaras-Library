@@ -42,7 +42,7 @@ export function AddToShelf({
     onSettled: () => setBusyId(null),
   })
 
-  const mine = data?.shelves.filter((s) => s.mine) ?? []
+  const mine = data?.shelves?.filter((s) => s.mine) ?? []
   if (!mine.length) {
     return <p className="hint">No shelves yet. Create one under Settings → Shelves.</p>
   }

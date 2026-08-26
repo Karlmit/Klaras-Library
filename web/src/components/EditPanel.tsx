@@ -281,11 +281,14 @@ function Lookup({
 
   if (isLoading) return <p style={{ color: 'var(--text-muted)' }}>Searching…</p>
   if (error) return <div className="error">{(error as Error).message}</div>
-  if (!data?.results.length) return <p style={{ color: 'var(--text-muted)' }}>Nothing found.</p>
+  // ?. on data alone is not enough: results itself can be absent, and reading
+  // .length off it is what turned "no matches" into a blank page.
+  const results = data?.results ?? []
+  if (!results.length) return <p style={{ color: 'var(--text-muted)' }}>Nothing found.</p>
 
   return (
     <div className="lookup">
-      {data.results.slice(0, 6).map((r, i) => (
+      {results.slice(0, 6).map((r, i) => (
         <button key={i} className="lookup__item" onClick={() => onApply(r)}>
           {r.cover_url && <img src={r.cover_url} alt="" loading="lazy" />}
           <div style={{ minWidth: 0 }}>

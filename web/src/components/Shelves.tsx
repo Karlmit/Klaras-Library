@@ -46,8 +46,8 @@ export function Shelves({ onBrowse }: { onBrowse: (shelfId: number) => void }) {
 
   if (isLoading) return <p>Loading…</p>
 
-  const mine = data?.shelves.filter((s) => s.mine) ?? []
-  const others = data?.shelves.filter((s) => !s.mine) ?? []
+  const mine = data?.shelves?.filter((s) => s.mine) ?? []
+  const others = data?.shelves?.filter((s) => !s.mine) ?? []
 
   return (
     <div>

@@ -105,7 +105,7 @@ export function SettingsKobo() {
 
       {isLoading ? (
         <p>Loading…</p>
-      ) : data?.tokens.length ? (
+      ) : data?.tokens?.length ? (
         <div className="table-wrap">
           <table className="table">
           <thead>
