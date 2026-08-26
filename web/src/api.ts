@@ -13,6 +13,7 @@ export interface BookListItem {
   rating?: number
   has_cover: boolean
   needs_review: boolean
+  adult_reason?: string
   pub_year?: number
   added_at: string
 }

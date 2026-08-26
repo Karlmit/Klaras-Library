@@ -37,6 +37,23 @@ var eroticaImprints = []string{
 // enough to be used unqualified, and everything else here is unambiguous.
 const eroticaWords = `\m(erotisk\w*|erotik|erotica|erotiken)\M`
 
+// eroticaPhrase is the same word next to a word for the kind of book it is:
+// "erotisk novell", "erotiska noveller", "den erotiska trilogin".
+//
+// A blurb for erotica almost always names the form. A blurb for a literary
+// novel that happens to use the word usually does not -- Sigrid Undset's
+// Kristin Lavransdotter and Bergman's Gycklarnas afton both match the bare
+// word and neither is erotica.
+//
+// This does not replace the bare word, because on its own it also drops
+// "Gullivers resa till sexland" and one of the Junis våta drömmar novellas.
+// It grades instead: a bare mention is real evidence, just the weakest kind,
+// and saying so is what lets a reviewer spend their attention where the
+// mistakes are.
+const eroticaPhrase = `erotisk[a-zäöå]* ` +
+	`(novell|roman|berättels|serie|trilogi|samling|kalender|thriller|romance|äventyr|dagbok|historia|fantasi)` +
+	`|erotica|novellsamling`
+
 // AdultCandidate is a book the scan believes is erotica.
 type AdultCandidate struct {
 	ID     int64
@@ -66,7 +83,8 @@ func (s *Store) ScanAdult(ctx context.Context, dryRun bool, out io.Writer) (*Adu
 		  CASE
 		    WHEN p.name ILIKE ANY($1) THEN 'imprint: ' || p.name
 		    WHEN b.title       ~* $2  THEN 'title'
-		    WHEN COALESCE(b.description,'')                  ~* $2 THEN 'description'
+		    WHEN COALESCE(b.description,'')                  ~* $3 THEN 'description'
+		    WHEN COALESCE(b.description,'')                  ~* $2 THEN 'description (mention only)'
 		    WHEN COALESCE(b.series_name,'')                  ~* $2 THEN 'series'
 		    WHEN COALESCE(array_to_string(b.tag_names,' '),'') ~* $2 THEN 'tag'
 		  END AS reason
@@ -81,7 +99,7 @@ func (s *Store) ScanAdult(ctx context.Context, dryRun bool, out io.Writer) (*Adu
 		     OR COALESCE(b.series_name,'') ~* $2
 		     OR COALESCE(array_to_string(b.tag_names,' '),'') ~* $2
 		  )
-		ORDER BY b.title_sort, b.id`, eroticaImprints, eroticaWords)
+		ORDER BY b.title_sort, b.id`, eroticaImprints, eroticaWords, eroticaPhrase)
 	if err != nil {
 		return nil, fmt.Errorf("scan for adult content: %w", err)
 	}

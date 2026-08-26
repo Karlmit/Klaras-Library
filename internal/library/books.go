@@ -22,6 +22,7 @@ type BookListItem struct {
 	Rating      *int16   `json:"rating,omitempty"`
 	HasCover    bool     `json:"has_cover"`
 	NeedsReview bool     `json:"needs_review"`
+	AdultReason string   `json:"adult_reason,omitempty"`
 	PubYear     *int     `json:"pub_year,omitempty"`
 	AddedAt     string   `json:"added_at"`
 }
@@ -278,7 +279,7 @@ func (s *Store) ListBooks(ctx context.Context, f Filter) (*BookPage, error) {
 
 	q := fmt.Sprintf(`
 		SELECT b.id, b.uuid, b.title, b.author_names, b.series_name, b.series_index,
-		       b.rating, b.has_cover, b.needs_review,
+		       b.rating, b.has_cover, b.needs_review, COALESCE(b.adult_reason,''),
 		       EXTRACT(YEAR FROM b.pubdate)::int, b.added_at,
 		       b.%s::text
 		FROM books b
@@ -299,7 +300,7 @@ func (s *Store) ListBooks(ctx context.Context, f Filter) (*BookPage, error) {
 		var added time.Time
 		var key *string
 		if err := rows.Scan(&it.ID, &it.UUID, &it.Title, &it.Authors, &it.Series,
-			&it.SeriesIndex, &it.Rating, &it.HasCover, &it.NeedsReview,
+			&it.SeriesIndex, &it.Rating, &it.HasCover, &it.NeedsReview, &it.AdultReason,
 			&it.PubYear, &added, &key); err != nil {
 			return nil, err
 		}

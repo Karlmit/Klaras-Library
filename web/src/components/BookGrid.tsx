@@ -202,6 +202,20 @@ function BookCard({
           height={300}
         />
         {book.needs_review && <span className="card__flag">review</span>}
+        {/* Only in the administrators' adult view, where every card is flagged
+            and the useful information is WHY. A bare mention of the word in a
+            blurb is the weakest evidence and where the mistakes are, so it says
+            so rather than looking like the rest. */}
+        {book.adult_reason && (
+          <span
+            className={`card__why ${
+              book.adult_reason.includes('mention only') ? 'card__why--weak' : ''
+            }`}
+            title={book.adult_reason}
+          >
+            {book.adult_reason.replace(/^imprint: /, '')}
+          </span>
+        )}
       </div>
       <div className="card__title" title={book.title}>
         {book.title}

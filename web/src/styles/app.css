@@ -215,6 +215,16 @@ select.sort {
     background: var(--warning); color: #fff;
     font-size: 10px; padding: 2px 5px; border-radius: 4px;
 }
+.card__why {
+    position: absolute; left: 6px; bottom: 6px; right: 6px;
+    background: rgb(0 0 0 / 0.72); color: #fff;
+    font-size: 10px; padding: 2px 5px; border-radius: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* A bare mention of the word, which is the weakest evidence and the only
+   reason worth reading every one of. */
+.card__why--weak { background: var(--warning); }
+
 .card__title {
     margin-top: 8px;
     font-size: 13px;
