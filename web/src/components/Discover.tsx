@@ -205,36 +205,61 @@ function Card({
   intent?: Verdict | null
   style?: React.CSSProperties
 } & React.HTMLAttributes<HTMLElement>) {
-  const meta: [string, string][] = []
-  if (card.series) meta.push(['Series', card.series + (card.series_index != null ? ` #${card.series_index}` : '')])
-  if (card.publisher) meta.push(['Publisher', card.publisher])
-  if (card.pub_year) meta.push(['Published', String(card.pub_year)])
-  if (card.languages?.length) meta.push(['Language', card.languages.join(', ')])
-  if (card.formats?.length) meta.push(['Formats', card.formats.join(' · ')])
-  if (card.rating) meta.push(['Rating', '★'.repeat(Math.round(card.rating / 2))])
+  // The line under the author: who published it and when, which is most of
+  // what places a book without reading a word of the blurb.
+  const line = [
+    card.series && card.series + (card.series_index != null ? ` #${card.series_index}` : ''),
+    card.publisher,
+    card.pub_year ? String(card.pub_year) : null,
+  ].filter(Boolean) as string[]
+
+  const chips = [
+    ...(card.formats ?? []),
+    ...(card.languages ?? []).map((l) => l.toUpperCase()),
+  ]
+
+  const cover = coverUrl(card.id, 'detail')
 
   return (
-    <article className={`disc__card ${behind ? 'disc__card--behind' : ''}`} style={style} {...handlers}>
+    <article
+      className={`disc__card ${behind ? 'disc__card--behind' : ''}`}
+      style={{ ...style, ['--cover' as string]: `url("${cover}")` }}
+      {...handlers}
+    >
       {intent && <span className={`disc__stamp disc__stamp--${intent}`}>
         {intent === 'keep' ? 'Keep' : 'Pass'}</span>}
-      <div className="disc__cover">
-        {card.has_cover
-          ? <img src={coverUrl(card.id, 'detail')} alt="" draggable={false} />
-          : <div className="disc__nocover" />}
-      </div>
+
+      {/* The book brings its own colour. Its cover, blurred and enlarged,
+          fills the band behind it, so the space either side of a portrait
+          jacket belongs to the book rather than to our tint. */}
+      <header className="disc__hero">
+        <img className="disc__jacket" src={cover} alt="" draggable={false} />
+        <div className="disc__ident">
+          <h2 className="disc__title">{card.title}</h2>
+          <p className="disc__by">{card.authors.join(', ') || 'Unknown'}</p>
+          {line.length > 0 && <p className="disc__line">{line.join(' · ')}</p>}
+          {card.rating ? (
+            <p className="disc__stars" aria-label={`Rated ${Math.round(card.rating / 2)} out of 5`}>
+              {'★'.repeat(Math.round(card.rating / 2))}
+              <span>{'★'.repeat(5 - Math.round(card.rating / 2))}</span>
+            </p>
+          ) : null}
+        </div>
+      </header>
+
       <div className="disc__body">
-        <h2 className="disc__title">{card.title}</h2>
-        <p className="disc__by">{card.authors.join(', ') || 'Unknown'}</p>
-        {card.tags?.length > 0 && (
-          <div className="disc__tags">
-            {card.tags.slice(0, 5).map((t) => <span key={t} className="disc__tag">{t}</span>)}
+        {chips.length > 0 && (
+          <div className="disc__chips">
+            {chips.map((c) => <span key={c} className="disc__chip">{c}</span>)}
           </div>
         )}
-        {card.description && <p className="disc__desc">{card.description}</p>}
-        {meta.length > 0 && (
-          <dl className="disc__meta">
-            {meta.map(([k, v]) => (<div key={k}><dt>{k}</dt><dd>{v}</dd></div>))}
-          </dl>
+        {card.description
+          ? <p className="disc__desc">{card.description}</p>
+          : <p className="disc__desc disc__desc--none">No description for this one.</p>}
+        {card.tags?.length > 0 && (
+          <div className="disc__tags">
+            {card.tags.slice(0, 6).map((t) => <span key={t} className="disc__tag">{t}</span>)}
+          </div>
         )}
       </div>
     </article>
