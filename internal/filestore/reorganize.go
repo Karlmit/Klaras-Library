@@ -72,21 +72,35 @@ func (s *Store) Reorganize(ctx context.Context, dryRun bool, out io.Writer, log 
 			rep.Failed++
 			continue
 		}
+
+		// Resolve collisions before deciding whether there is anything to do.
+		//
+		// PlanFor renders the template without disambiguation, so a book
+		// already correctly filed at "Title (id)" -- there are 400 of them
+		// here -- targets "Title", looks like it needs moving, and resolves
+		// straight back to where it started. Checking Empty() first counted
+		// every one of those as work: 481 planned where 81 move.
+		//
+		// A dry run carries a claims map, since nothing it plans is committed
+		// for the next book to see. A real run passes nil and reads the
+		// database, which each Apply updates as it goes.
+		var claims map[string]int64
+		if dryRun {
+			claims = claimed
+		}
+		resolved, err := s.PreviewDir(ctx, plan.ToDir, id, claims)
+		if err != nil {
+			log.Warn("could not resolve destination", "book", id, "err", err)
+			rep.Failed++
+			continue
+		}
+		plan.ToDir = resolved
+
 		if plan.Empty() {
 			rep.Unchanged++
 			continue
 		}
 		rep.Planned++
-
-		if dryRun {
-			resolved, err := s.PreviewDir(ctx, plan.ToDir, id, claimed)
-			if err != nil {
-				log.Warn("could not resolve destination", "book", id, "err", err)
-				rep.Failed++
-				continue
-			}
-			plan.ToDir = resolved
-		}
 
 		if w != nil {
 			fmt.Fprintf(w, "book %d\n  from %s\n    to %s\n", id, plan.FromDir, plan.ToDir)

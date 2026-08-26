@@ -868,3 +868,58 @@ func TestSlashInMetadataDoesNotCreateDirectories(t *testing.T) {
 }
 
 func ptrf(v float64) *float64 { return &v }
+
+// TestSettledLibraryReportsNothingToDo is the property a reorganize report
+// needs: run it twice and the second run has nothing to say.
+//
+// A book disambiguated to "Title (id)" renders to "Title" and resolves back to
+// "Title (id)", so it is already where it belongs. Deciding that before
+// resolving counted all 400 such books in the real library as work -- 481
+// planned against 81 that move -- which makes the number useless for spotting
+// that something unexpected is about to happen.
+func TestSettledLibraryReportsNothingToDo(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+
+	// A second book with the same title and author, so one gets a suffix.
+	second := filepath.Join(f.root, "Old Author", "Old Title Duplicate")
+	if err := os.MkdirAll(second, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(second, "book.epub"), []byte("second copy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var id2 int64
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO books (uuid, title, author_sort, path)
+		VALUES (gen_random_uuid(), 'Röda Rummet', 'Strindberg, August', 'Old Author/Old Title Duplicate')
+		RETURNING id`).Scan(&id2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO book_files (book_id, format, filename, size_bytes)
+		VALUES ($1,'EPUB','book.epub',11)`, id2); err != nil {
+		t.Fatal(err)
+	}
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	first, err := f.st.Reorganize(ctx, false, io.Discard, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Applied != 2 || first.Failed != 0 {
+		t.Fatalf("first run: %+v, want 2 applied and 0 failed", first)
+	}
+
+	for _, dry := range []bool{true, false} {
+		rep, err := f.st.Reorganize(ctx, dry, io.Discard, log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rep.Planned != 0 || rep.Unchanged != 2 {
+			t.Errorf("second run (dryRun=%v): %+v; a settled library must report "+
+				"nothing to move, or the number cannot be used to spot surprises",
+				dry, rep)
+		}
+	}
+}
