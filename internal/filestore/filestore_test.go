@@ -653,3 +653,72 @@ func destinations(plan string) []string {
 	}
 	return out
 }
+
+// TestCaseOnlyDifferenceIsFiledApart keeps the tree portable.
+//
+// Two books whose titles differ only in capitalisation render to directories a
+// case-sensitive filesystem keeps apart and Windows, macOS and exFAT do not.
+// Left alone, copying the library to any of those merges the folders and one
+// book's files overwrite the other's. This library has eleven such pairs.
+func TestCaseOnlyDifferenceIsFiledApart(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+
+	shouty := filepath.Join(f.root, "Old Author", "Shouty")
+	if err := os.MkdirAll(shouty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(shouty, "book.epub"), []byte("the loud one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Same author, same title, different case: "RÖDA RUMMET" vs "Röda Rummet".
+	var id2 int64
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO books (uuid, title, author_sort, path)
+		VALUES (gen_random_uuid(), 'RÖDA RUMMET', 'Strindberg, August', 'Old Author/Shouty')
+		RETURNING id`).Scan(&id2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO book_files (book_id, format, filename, size_bytes)
+		VALUES ($1,'EPUB','book.epub',12)`, id2); err != nil {
+		t.Fatal(err)
+	}
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if _, err := f.st.Reorganize(ctx, false, io.Discard, log); err != nil {
+		t.Fatal(err)
+	}
+
+	var paths []string
+	rows, err := f.pool.Query(ctx, `SELECT path FROM books ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 books, got %v", paths)
+	}
+	if strings.EqualFold(paths[0], paths[1]) {
+		t.Errorf("both books filed at %q ignoring case; on Windows or macOS one "+
+			"would overwrite the other", paths[0])
+	}
+
+	// Both survived on disk.
+	for _, p := range paths {
+		entries, err := os.ReadDir(filepath.Join(f.root, p))
+		if err != nil {
+			t.Fatalf("reading %s: %v", p, err)
+		}
+		if len(entries) == 0 {
+			t.Errorf("%s is empty", p)
+		}
+	}
+}

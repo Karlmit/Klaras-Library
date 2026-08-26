@@ -271,13 +271,20 @@ func (s *Store) uniqueDir(ctx context.Context, dir string, bookID int64) (string
 // passes a map so that a dry run reports the same directories the real run will
 // choose -- otherwise the plan an operator reviews is not the plan that runs.
 func (s *Store) resolveDir(ctx context.Context, dir string, bookID int64, claimed map[string]int64) (string, error) {
+	// Case-insensitively, because the tree has to survive being copied to a
+	// filesystem that does not distinguish "Hjärnstark" from "HJÄRNSTARK".
+	// Backed by books_path_lower_idx; without it this is a sequential scan
+	// performed once per book.
+	key := strings.ToLower(dir)
+
 	taken := false
-	if owner, ok := claimed[dir]; ok && owner != bookID {
+	if owner, ok := claimed[key]; ok && owner != bookID {
 		taken = true
 	}
 	if !taken {
 		var owner int64
-		err := s.pool.QueryRow(ctx, `SELECT id FROM books WHERE path=$1 AND id<>$2`, dir, bookID).
+		err := s.pool.QueryRow(ctx,
+			`SELECT id FROM books WHERE lower(path)=lower($1) AND id<>$2`, dir, bookID).
 			Scan(&owner)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
@@ -292,7 +299,7 @@ func (s *Store) resolveDir(ctx context.Context, dir string, bookID int64, claime
 		dir = fmt.Sprintf("%s (%d)", dir, bookID)
 	}
 	if claimed != nil {
-		claimed[dir] = bookID
+		claimed[strings.ToLower(dir)] = bookID
 	}
 	return dir, nil
 }
