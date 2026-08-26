@@ -156,6 +156,8 @@ func (s *Server) routes() {
 				r.Post("/shelves/{id}/kobo-subscription", s.handleKoboSubscribe)
 				r.Delete("/shelves/{id}/kobo-subscription", s.handleKoboSubscribe)
 				r.Get("/books/ids", s.handleBookIDs)
+				r.Get("/discover", s.handleDiscoverDeck)
+				r.Post("/discover", s.handleDiscoverDecide)
 				r.Get("/kobo/tokens", s.handleListKoboTokens)
 				r.Post("/kobo/tokens", s.handleKoboToken)
 				r.Post("/kobo/resync", s.handleKoboResync)

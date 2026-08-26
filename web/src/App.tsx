@@ -6,6 +6,9 @@ import { BulkBar } from './components/BulkBar'
 import { EditPanel } from './components/EditPanel'
 // epub.js is ~370kB and most visits never open a book in the browser, so the
 // reader is split into its own chunk and fetched only when it is used.
+const Discover = lazy(() =>
+  import('./components/Discover').then((m) => ({ default: m.Discover })),
+)
 const Reader = lazy(() =>
   import('./components/Reader').then((m) => ({ default: m.Reader })),
 )
@@ -41,6 +44,8 @@ export function App() {
   const [searchInput, setSearchInput] = useState('')
 
   // Back closes whatever is open instead of leaving the site.
+  const [discoverOpen, setDiscoverOpen] = useState(false)
+  const closeDiscover = useCallback(() => setDiscoverOpen(false), [])
   const [navOpen, setNavOpen] = useState(false)
   const closeNav = useCallback(() => setNavOpen(false), [])
   const closeSettings = useCallback(() => setSettingsOpen(false), [])
@@ -56,6 +61,7 @@ export function App() {
   // The drawer is an overlay like any other, so Back closes it rather than
   // leaving the site -- the first thing a thumb reaches for on a phone.
   useOverlayHistory(navOpen, closeNav)
+  useOverlayHistory(discoverOpen, closeDiscover)
 
   const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ['status'],
@@ -259,6 +265,7 @@ export function App() {
         }}
         isAdmin={user.role === 'admin'}
         open={navOpen}
+        onDiscover={() => { closeNav(); setDiscoverOpen(true) }}
         account={{
           username: user.username,
           onSettings: () => { closeNav(); setSettingsOpen(true) },
@@ -347,6 +354,25 @@ export function App() {
       {editing != null && <EditPanel bookId={editing} onClose={closeEdit} />}
 
       {uploadOpen && <Upload onClose={closeUpload} />}
+
+      {discoverOpen && (
+        <div className="sheet" role="dialog" aria-label="Random book">
+          <div className="sheet__head">
+            <button className="btn btn--sm btn--ghost" onClick={closeDiscover}>← Back to library</button>
+            <h1 className="sheet__title">Random book</h1>
+          </div>
+          <Suspense fallback={<div className="disc"><p className="disc__msg">Shuffling…</p></div>}>
+            <Discover
+              onOpenShelf={(id) => {
+                closeDiscover()
+                patchQuery({ shelf: id, author: undefined, tag: undefined, series: undefined,
+                             language: undefined, format: undefined, needs_review: false,
+                             adult: undefined, q: undefined })
+              }}
+            />
+          </Suspense>
+        </div>
+      )}
 
       {reading && (
         <Suspense fallback={<div className="reader"><div className="reader__status">Loading reader…</div></div>}>

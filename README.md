@@ -430,6 +430,21 @@ Everything an operator needs day to day is also in the browser, under
 account on the Users tab, to reset someone else's device. Reach for the CLI when
 the browser is not an option, not as the normal path.
 
+### Random book
+
+A discovery screen: one cover at a time, kept or passed with a swipe, the arrow
+keys, or the buttons. It is the top entry in the sidebar.
+
+What a reader keeps goes onto an ordinary shelf called **Discoveries**, one per
+account, created automatically. That is the point of using a shelf rather than
+a private list: it can be marked **Sync to Kobo** like any other, so swiping
+right on a phone puts the book on the reader. It can also be renamed -- the
+shelf is found by a flag, not by its name.
+
+Only books with a cover are offered, since a card is mostly cover. Adult
+content never appears. A pass is remembered, so the same book does not come
+round again; Undo takes back the last decision either way.
+
 ### Adult content
 
 `klaras scan-adult --dry-run` identifies erotica from metadata and lists it;

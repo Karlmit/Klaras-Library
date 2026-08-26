@@ -795,3 +795,170 @@ select.sort {
     .tab { min-height: 44px; }
     .drawer__close, .search__clear { min-width: 44px; min-height: 44px; }
 }
+
+/* ---- Random book ---------------------------------------------------------
+ *
+ * A deliberately different room from the rest of the app: the grid is for
+ * finding a book you already have in mind, this is for meeting one you don't.
+ * So the chrome recedes — a tinted ground, a single card holding the light,
+ * and nothing else competing for the eye.
+ */
+.disc {
+    display: flex; flex-direction: column; height: 100%;
+    background:
+      radial-gradient(120% 80% at 50% -10%, var(--v-100) 0%, transparent 60%),
+      var(--shell);
+    overflow: hidden;
+}
+.disc__bar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 12px 18px; flex: none;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 72%, transparent);
+    backdrop-filter: blur(6px);
+}
+.disc__tally { display: flex; gap: 16px; font-size: 13px; color: var(--text-muted); }
+.disc__tally b { color: var(--text); font-variant-numeric: tabular-nums; }
+.disc__left { color: var(--v-600); }
+.disc__msg { margin: auto; color: var(--text-muted); }
+
+.disc__stage {
+    flex: 1; position: relative; display: grid; place-items: center;
+    padding: 18px; min-height: 0;
+}
+
+.disc__card {
+    position: absolute;
+    width: min(420px, 92vw);
+    max-height: 100%;
+    display: flex; flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: 0 18px 50px -20px rgb(40 24 70 / .38), 0 2px 6px rgb(40 24 70 / .06);
+    overflow: hidden;
+    cursor: grab;
+    touch-action: none;           /* the card owns horizontal drags, not the page */
+    user-select: none;
+    will-change: transform;
+}
+.disc__card:active { cursor: grabbing; }
+/* The next card, just visible underneath, so the stack reads as a stack. */
+.disc__card--behind {
+    transform: scale(.955) translateY(14px);
+    filter: saturate(.8);
+    opacity: .7;
+    pointer-events: none;
+    box-shadow: 0 10px 30px -18px rgb(40 24 70 / .3);
+}
+
+.disc__cover { flex: none; background: var(--v-100); display: grid; place-items: center; }
+.disc__cover img {
+    display: block; width: 100%; max-height: 46vh; object-fit: contain;
+    background: var(--v-100);
+}
+.disc__nocover { width: 100%; aspect-ratio: var(--cover-ratio); background: var(--v-200); }
+
+.disc__body { padding: 16px 18px 20px; overflow-y: auto; overscroll-behavior: contain; }
+.disc__title {
+    font-family: var(--font-display); font-weight: 600;
+    font-size: 22px; line-height: 1.2; margin: 0; text-wrap: balance;
+}
+.disc__by { margin: 5px 0 0; color: var(--text-muted); font-size: 14px; }
+.disc__tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 11px; }
+.disc__tag {
+    font-size: 11.5px; padding: 2px 8px; border-radius: 20px;
+    background: var(--v-50); color: var(--v-800); border: 1px solid var(--v-200);
+}
+.disc__desc {
+    margin: 13px 0 0; font-size: 14px; line-height: 1.55; color: var(--text);
+    max-width: 60ch;
+}
+.disc__meta {
+    margin: 15px 0 0; padding-top: 13px; border-top: 1px solid var(--border);
+    display: grid; gap: 5px 14px; font-size: 12.5px;
+}
+.disc__meta > div { display: grid; grid-template-columns: 82px 1fr; gap: 10px; }
+.disc__meta dt { color: var(--text-muted); }
+.disc__meta dd { margin: 0; }
+
+/* Verdict stamp, angled like a rubber stamp because that is the gesture. */
+.disc__stamp {
+    position: absolute; top: 18px; z-index: 2;
+    font-family: var(--font-display); font-weight: 600; font-size: 26px;
+    letter-spacing: .04em; padding: 4px 16px; border-radius: 8px;
+    border: 3px solid currentColor; pointer-events: none;
+}
+.disc__stamp--keep { left: 18px;  transform: rotate(-11deg); color: var(--success); }
+.disc__stamp--pass { right: 18px; transform: rotate(11deg);  color: var(--danger); }
+
+.disc__acts {
+    flex: none; display: flex; justify-content: center; align-items: flex-start;
+    gap: 24px; padding: 14px 18px 22px;
+}
+.disc__act {
+    display: flex; flex-direction: column; align-items: center; gap: 7px;
+    border: 0; background: none; padding: 0; cursor: pointer; font: inherit;
+    color: var(--text-muted);
+}
+.disc__glyph {
+    display: grid; place-items: center;
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--surface); border: 1px solid var(--border);
+    box-shadow: 0 4px 14px -6px rgb(40 24 70 / .28);
+    font-size: 23px; line-height: 1; color: inherit;
+    transition: transform 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.disc__label { font-size: 11.5px; }
+.disc__act:disabled { opacity: .42; cursor: not-allowed; }
+.disc__act:not(:disabled):hover .disc__glyph { transform: translateY(-2px); }
+.disc__act--keep:not(:disabled):hover { color: var(--success); }
+.disc__act--keep:not(:disabled):hover .disc__glyph { border-color: var(--success); }
+.disc__act--pass:not(:disabled):hover { color: var(--danger); }
+.disc__act--pass:not(:disabled):hover .disc__glyph { border-color: var(--danger); }
+.disc__act--undo:not(:disabled):hover { color: var(--accent); }
+.disc__act--undo:not(:disabled):hover .disc__glyph { border-color: var(--accent); }
+.disc__act--undo .disc__glyph { width: 46px; height: 46px; font-size: 19px; margin-top: 5px; }
+.disc__act:focus-visible .disc__glyph { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.disc__done {
+    text-align: center; max-width: 44ch; padding: 24px;
+}
+.disc__done h2 { font-family: var(--font-display); font-weight: 600; margin: 0 0 8px; }
+.disc__done p { color: var(--text-muted); margin: 0 0 18px; }
+
+@media (max-width: 820px), (hover: none) {
+    .disc__card { width: min(420px, 94vw); border-radius: 16px; }
+    .disc__cover img { max-height: 38vh; }
+    .disc__acts { gap: 26px; padding-bottom: 26px; }
+    .disc__act { width: 74px; min-height: 56px; }
+    .disc__bar { padding: 10px 12px; }
+    .disc__tally { gap: 11px; font-size: 12.5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .disc__card { transition: none !important; }
+}
+
+/* The discovery entry sits above the filters because it is not a filter — it
+   is a different way into the library, and the first thing offered. */
+.navitem--feature {
+    margin: 2px 8px 10px; border-radius: var(--radius-sm);
+    background: var(--v-50); border: 1px solid var(--v-200);
+    color: var(--v-800); font-weight: 500;
+}
+.navitem--feature:hover { background: var(--v-100); border-color: var(--v-300); }
+
+/* Full-window surface for a screen that is not the grid. */
+.sheet {
+    position: fixed; inset: 0; z-index: 40;
+    background: var(--shell); display: flex; flex-direction: column;
+}
+.sheet__head {
+    flex: none; display: flex; align-items: center; gap: 14px;
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+}
+.sheet__title {
+    margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 17px;
+}
+.sheet > .disc, .sheet > * + * { min-height: 0; flex: 1; }

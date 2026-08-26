@@ -11,6 +11,7 @@ interface Props {
   /** Shown at the foot of the drawer on narrow screens, where the top bar has
    *  no room for these and the search field needs the whole width. */
   account?: { username: string; onSettings: () => void; onSignOut: () => void }
+  onDiscover?: () => void
 }
 
 /**
@@ -20,7 +21,7 @@ interface Props {
  * live they cost ~22ms each, and there are five of them, so a page load would
  * spend most of its budget counting things that barely change.
  */
-export function Sidebar({ query, onChange, isAdmin, open = false, account }: Props) {
+export function Sidebar({ query, onChange, isAdmin, open = false, account, onDiscover }: Props) {
   const { data } = useQuery({ queryKey: ['facets'], queryFn: api.facets, staleTime: 60_000 })
   const { data: shelves } = useQuery({ queryKey: ['shelves'], queryFn: shelvesApi.list })
 
@@ -42,6 +43,11 @@ export function Sidebar({ query, onChange, isAdmin, open = false, account }: Pro
 
   return (
     <nav className={`sidebar ${open ? 'sidebar--open' : ''}`} aria-label="Library filters">
+      {onDiscover && (
+        <button className="navitem navitem--feature" onClick={onDiscover}>
+          <span className="navitem__label">🎲 Random book</span>
+        </button>
+      )}
       <div className="navhead">Library</div>
       <button
         className={`navitem ${noFilter ? 'navitem--active' : ''}`}

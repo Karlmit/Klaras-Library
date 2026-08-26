@@ -254,6 +254,41 @@ export const editApi = {
     ),
 }
 
+export interface DiscoverCard {
+  id: number
+  uuid: string
+  title: string
+  authors: string[]
+  series?: string
+  series_index?: number
+  description?: string
+  publisher?: string
+  pub_year?: number
+  rating?: number
+  tags: string[]
+  languages: string[]
+  has_cover: boolean
+  formats: string[]
+}
+
+export interface DiscoverStats {
+  kept: number
+  passed: number
+  remaining: number
+  shelf_id: number
+  shelf_name: string
+}
+
+export const discoverApi = {
+  deck: (limit = 8) =>
+    req<{ cards: DiscoverCard[]; stats: DiscoverStats }>(`/api/discover?limit=${limit}`),
+  decide: (book_id: number, action: 'keep' | 'pass' | 'undo') =>
+    req<{ stats: DiscoverStats }>('/api/discover', {
+      method: 'POST',
+      body: JSON.stringify({ book_id, action }),
+    }),
+}
+
 export const koboApi = {
   tokens: () =>
     req<{ tokens: { id: number; label: string; created_at: string; last_used_at: string | null }[] }>(
