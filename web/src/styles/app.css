@@ -1018,3 +1018,48 @@ select.sort {
 .shelfpick__item--on { background: var(--v-50); border-color: var(--v-200); }
 .shelfpick__item--on:hover { background: var(--v-100); }
 .shelfpick__done { align-self: flex-start; margin-top: 4px; }
+
+/* ---- description backfill status ----------------------------------------*/
+.desc__bar {
+    height: 10px; border-radius: 999px; overflow: hidden;
+    background: var(--surface-sunken); border: 1px solid var(--border);
+    margin: 16px 0 8px;
+}
+.desc__fill { height: 100%; background: var(--accent); border-radius: 999px; }
+.desc__legend { margin: 0 0 18px; font-size: 13.5px; color: var(--text-muted); }
+.desc__legend strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.desc__pct { float: right; color: var(--accent); font-weight: 600; }
+
+.desc__stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px; margin: 0 0 16px;
+}
+.desc__stats > div {
+    background: var(--surface-sunken); border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: 10px 12px;
+}
+.desc__stats dt { font-size: 12px; color: var(--text-muted); }
+.desc__stats dd {
+    margin: 3px 0 0; font-size: 19px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.desc__h { font-size: 14px; margin: 22px 0 10px; }
+/* Two bars per day, overlaid rather than stacked: what was asked, and how much
+   of it came back with something. The gap between them is the hit rate, which
+   is the thing worth seeing at a glance. */
+.desc__spark { display: flex; gap: 4px; align-items: flex-end; height: 76px; }
+.desc__day { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.desc__col { position: relative; width: 100%; height: 60px; }
+.desc__asked, .desc__found {
+    position: absolute; bottom: 0; left: 0; right: 0; border-radius: 3px 3px 0 0;
+    min-height: 1px;
+}
+.desc__asked { background: var(--v-200); }
+.desc__found { background: var(--accent); }
+.desc__tick { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.desc__key { display: flex; align-items: center; gap: 6px; font-size: 12px;
+             color: var(--text-muted); margin: 8px 0 18px; }
+.desc__swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.desc__swatch--found { background: var(--accent); }
+.desc__swatch--asked { background: var(--v-200); margin-left: 10px; }

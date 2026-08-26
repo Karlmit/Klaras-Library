@@ -191,6 +191,8 @@ func (s *Server) routes() {
 				// able to change it must not be something a reader has.
 				r.Put("/books/{id}/adult", s.handleSetAdult)
 				r.Post("/books/adult", s.handleSetAdultMany)
+				r.Get("/descriptions", s.handleDescriptionStatus)
+				r.Post("/descriptions/run", s.handleDescriptionRun)
 			})
 		})
 	})

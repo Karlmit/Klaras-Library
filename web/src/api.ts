@@ -289,6 +289,27 @@ export const discoverApi = {
     }),
 }
 
+export interface DescriptionStatus {
+  total: number
+  with_description: number
+  missing: number
+  missing_with_isbn: number
+  remaining: number
+  unreachable: number
+  last_run?: string
+  found_in_files: number
+  found_via_google: number
+  asked_google: number
+  recent: { day: string; found: number; asked: number }[]
+  google_enabled: boolean
+  running: boolean
+}
+
+export const descriptionsApi = {
+  status: () => req<DescriptionStatus>('/api/descriptions'),
+  run: () => req<{ status: string }>('/api/descriptions/run', { method: 'POST' }),
+}
+
 export const koboApi = {
   tokens: () =>
     req<{ tokens: { id: number; label: string; created_at: string; last_used_at: string | null }[] }>(

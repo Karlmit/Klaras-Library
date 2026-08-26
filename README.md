@@ -454,6 +454,12 @@ Matching is on ISBN alone, never on title and author, and the returned title
 still has to resemble the one on file. A wrong blurb is worse than none: it
 reads as authoritative and nobody re-checks it.
 
+**Settings → Descriptions** shows how it is getting on: how much of the library
+has a description, how many books are still to try, how many are out of reach
+(no ISBN, or Google had no record), what the last fortnight looked like, when it
+last ran, and roughly how many more nights it needs. **Run now** starts a pass
+immediately rather than waiting for tonight.
+
 The free quota is 1,000 lookups a day, so a large library takes a week or two.
 Every attempt is recorded, successful or not, so each night continues where the
 last stopped instead of re-asking the same first thousand. `klaras

@@ -3,9 +3,10 @@ import { useMutation } from '@tanstack/react-query'
 import { api, type User } from '../api'
 import { SettingsKobo } from './SettingsKobo'
 import { SettingsUsers } from './SettingsUsers'
+import { SettingsDescriptions } from './SettingsDescriptions'
 import { Shelves } from './Shelves'
 
-type Tab = 'kobo' | 'shelves' | 'users' | 'account'
+type Tab = 'kobo' | 'shelves' | 'users' | 'descriptions' | 'account'
 
 export function Settings({
   user, onClose, onBrowseShelf,
@@ -21,6 +22,7 @@ export function Settings({
     { id: 'kobo', label: 'Kobo devices', show: true },
     { id: 'shelves', label: 'Shelves', show: true },
     { id: 'users', label: 'Users', show: isAdmin },
+    { id: 'descriptions', label: 'Descriptions', show: isAdmin },
     { id: 'account', label: 'Your account', show: true },
   ]
 
@@ -58,6 +60,7 @@ export function Settings({
           />
         )}
         {tab === 'users' && isAdmin && <SettingsUsers me={user} />}
+        {tab === 'descriptions' && isAdmin && <SettingsDescriptions />}
         {tab === 'account' && <AccountTab user={user} />}
       </div>
     </div>

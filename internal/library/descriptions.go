@@ -474,3 +474,93 @@ func (s *Store) RunDescriptionFetcher(
 		}
 	}
 }
+
+// DescriptionStatus is what the settings screen shows: enough to answer "is it
+// running", "what did it do last night" and "when will it be finished" without
+// reading a container log.
+type DescriptionStatus struct {
+	Total           int64 `json:"total"`
+	WithText        int64 `json:"with_description"`
+	Missing         int64 `json:"missing"`
+	MissingWithISBN int64 `json:"missing_with_isbn"`
+	// Remaining is what the fetcher can still act on: books that have an ISBN
+	// and have not been asked about. The rest of Missing is out of its reach,
+	// which is the difference between "not finished" and "finished, and this is
+	// what is left over".
+	Remaining     int64      `json:"remaining"`
+	Unreachable   int64      `json:"unreachable"`
+	LastRun       *time.Time `json:"last_run,omitempty"`
+	FromFiles     int64      `json:"found_in_files"`
+	FromGoogle    int64      `json:"found_via_google"`
+	AskedGoogle   int64      `json:"asked_google"`
+	Recent        []DayCount `json:"recent"`
+	GoogleEnabled bool       `json:"google_enabled"`
+	Running       bool       `json:"running"`
+}
+
+// DayCount is one day's activity, for the little bar strip.
+type DayCount struct {
+	Day   string `json:"day"`
+	Found int64  `json:"found"`
+	Asked int64  `json:"asked"`
+}
+
+// DescriptionStatusFor gathers the counts.
+func (s *Store) DescriptionStatusFor(ctx context.Context) (*DescriptionStatus, error) {
+	var st DescriptionStatus
+	err := s.pool.QueryRow(ctx, `
+		SELECT count(*),
+		       count(*) FILTER (WHERE COALESCE(btrim(description),'') <> ''),
+		       count(*) FILTER (WHERE COALESCE(btrim(description),'') = ''),
+		       count(*) FILTER (WHERE COALESCE(btrim(description),'') = ''
+		                          AND EXISTS (SELECT 1 FROM identifiers i
+		                                       WHERE i.book_id = books.id AND i.scheme='isbn'))
+		FROM books`).Scan(&st.Total, &st.WithText, &st.Missing, &st.MissingWithISBN)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.pool.QueryRow(ctx, `
+		SELECT count(*) FROM books b
+		WHERE COALESCE(btrim(b.description),'') = ''
+		  AND EXISTS (SELECT 1 FROM identifiers i WHERE i.book_id=b.id AND i.scheme='isbn')
+		  AND NOT EXISTS (SELECT 1 FROM description_lookups d
+		                   WHERE d.book_id=b.id AND d.source='google')`).Scan(&st.Remaining)
+	if err != nil {
+		return nil, err
+	}
+	st.Unreachable = st.Missing - st.Remaining
+
+	err = s.pool.QueryRow(ctx, `
+		SELECT max(tried_at),
+		       count(*) FILTER (WHERE source='epub'   AND found),
+		       count(*) FILTER (WHERE source='google' AND found),
+		       count(*) FILTER (WHERE source='google')
+		FROM description_lookups`).Scan(&st.LastRun, &st.FromFiles, &st.FromGoogle, &st.AskedGoogle)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT to_char(d::date,'YYYY-MM-DD'),
+		       -- count(l.book_id), not count(*): the left join keeps a row for
+		       -- every generated day, so count(*) would report one lookup on
+		       -- days when nothing ran.
+		       count(l.book_id) FILTER (WHERE l.found),
+		       count(l.book_id)
+		FROM generate_series(current_date - interval '13 days', current_date, interval '1 day') d
+		LEFT JOIN description_lookups l ON l.tried_at::date = d::date
+		GROUP BY d ORDER BY d`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c DayCount
+		if err := rows.Scan(&c.Day, &c.Found, &c.Asked); err != nil {
+			return nil, err
+		}
+		st.Recent = append(st.Recent, c)
+	}
+	return &st, rows.Err()
+}
