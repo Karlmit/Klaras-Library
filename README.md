@@ -48,7 +48,10 @@ critical query starts sequentially scanning `books`.
 - **Managed file tree** — `Author/Series/Title`, with every move journalled so a
   crash cannot leave the database and the disk disagreeing.
 - **Watch folder** — drop files in and they are imported, filed and converted.
-- **Metadata lookup** — Google Books and Open Library, reviewed before applying.
+- **Metadata lookup** — Google Books and Open Library. Results open as a field-by-field
+  checklist showing what you have beside what was found, cover included. Fields are
+  ticked by default only where the book has nothing, so a wrong edition cannot
+  overwrite good metadata, and nothing but the cover is written until you press Save.
 - **OPDS 1.2 and 2.0** — for KOReader, Moon+ Reader and friends.
 - **In-browser reader** — lazy-loaded, so it costs nothing until used.
 - **Multi-user** — admin, editor and reader roles, per-user shelves and Kobo tokens.

@@ -75,7 +75,13 @@ export function BookDetail({ bookId, onClose, onFilter, onEdit, onRead, canEdit 
             ) : null}
 
             <div className="drawer__head">
-              <img className="drawer__cover" src={coverUrl(book.id, 'detail')} alt="" />
+              <img
+                className="drawer__cover"
+                // updated_at moves when the cover is replaced, so the browser
+                // fetches the new one instead of serving a day-old cache entry.
+                src={`${coverUrl(book.id, 'detail')}?v=${encodeURIComponent(book.updated_at)}`}
+                alt=""
+              />
               <div style={{ minWidth: 0 }}>
                 <h2>{book.title}</h2>
                 <div className="drawer__byline">

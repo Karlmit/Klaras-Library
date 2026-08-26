@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, booksApi, coverUrl, editApi, type Book, type BookEdit, type MetadataResult } from '../api'
+import { LookupPicker } from './LookupPicker'
 
 interface Props {
   bookId: number
@@ -15,9 +16,17 @@ export function EditPanel({ bookId, onClose }: Props) {
   const [form, setForm] = useState<BookEdit>({})
   const [error, setError] = useState('')
   const [lookupOpen, setLookupOpen] = useState(false)
+  const [chosen, setChosen] = useState<MetadataResult | null>(null)
 
+  // Seed the form from the book once per book, not on every change to it.
+  // Fetching a cover invalidates this query on purpose (so the thumbnail
+  // refreshes), and re-seeding on the refetch silently threw away the fields
+  // the person had just picked in the lookup panel.
+  const seeded = useRef<number | null>(null)
   useEffect(() => {
     if (!book) return
+    if (seeded.current === bookId) return
+    seeded.current = bookId
     setForm({
       title: book.title,
       authors: book.authors,
@@ -30,7 +39,7 @@ export function EditPanel({ bookId, onClose }: Props) {
       languages: book.languages,
       rating: book.rating,
     })
-  }, [book])
+  }, [book, bookId])
 
   const save = useMutation({
     mutationFn: (e: BookEdit) => editApi.one(bookId, e),
@@ -72,23 +81,24 @@ export function EditPanel({ bookId, onClose }: Props) {
           {lookupOpen ? 'Hide lookup' : 'Look up online…'}
         </button>
 
-        {lookupOpen && (
-          <Lookup
+        {lookupOpen && !chosen && (
+          <Lookup bookId={bookId} onApply={(r) => setChosen(r)} />
+        )}
+
+        {lookupOpen && chosen && book && (
+          <LookupPicker
             bookId={bookId}
-            onApply={(r) => {
-              // Applied into the form, never straight to the database: providers
-              // routinely return a different edition, or a different book.
-              setForm((f) => ({
-                ...f,
-                title: r.title || f.title,
-                authors: r.authors?.length ? r.authors : f.authors,
-                series: r.series || f.series,
-                publisher: r.publisher || f.publisher,
-                pubdate: normaliseDate(r.pubdate) || f.pubdate,
-                description: r.description || f.description,
-                tags: r.tags?.length ? r.tags : f.tags,
-              }))
+            book={book}
+            result={chosen}
+            onBack={() => setChosen(null)}
+            onApply={(patch: Partial<BookEdit>) => {
+              // Into the form, never straight to the database: a provider
+              // routinely returns a different edition, and the person editing
+              // is the one who can tell.
+              setForm((f) => ({ ...f, ...patch }))
+              setChosen(null)
               setLookupOpen(false)
+              void qc.invalidateQueries({ queryKey: ['book', bookId] })
             }}
           />
         )}
@@ -290,15 +300,6 @@ function Lookup({
       ))}
     </div>
   )
-}
-
-/** Providers return years, year-months and full dates; the input needs a date. */
-function normaliseDate(s?: string): string | undefined {
-  if (!s) return undefined
-  if (/^\d{4}$/.test(s)) return `${s}-01-01`
-  if (/^\d{4}-\d{2}$/.test(s)) return `${s}-01`
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
-  return undefined
 }
 
 /** Book is referenced only for its type. */

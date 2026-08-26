@@ -176,6 +176,7 @@ func (s *Server) routes() {
 				r.Post("/books/bulk-delete", s.handleBulkDelete)
 				r.Post("/books/upload", s.handleUploadBook)
 				r.Put("/books/{id}/cover", s.handleReplaceCover)
+				r.Post("/books/{id}/cover/fetch", s.handleFetchCover)
 			})
 
 			// Account administration.

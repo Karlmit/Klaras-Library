@@ -406,6 +406,11 @@ export const booksApi = {
     return upload<{ results: UploadResult[] }>('/api/books/upload', form)
   },
 
+  fetchCover: (id: number, url: string) =>
+    req<{ status: string }>(`/api/books/${id}/cover/fetch`, {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
   replaceCover: (id: number, file: File) => {
     const form = new FormData()
     form.append('file', file)
