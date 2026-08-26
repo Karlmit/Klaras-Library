@@ -8,10 +8,19 @@ import (
 	"github.com/Karlmit/Klaras-Library/internal/library"
 )
 
-// handleListBooks serves the grid.
-func (s *Server) handleListBooks(w http.ResponseWriter, r *http.Request) {
+// parseBookFilter reads the filter half of a books query.
+//
+// Shared by the grid and by select-all, and shared deliberately rather than
+// written twice. When they were parsed separately, select-all was missed when
+// the adult filter was added: it went on returning 20,000 ordinary books while
+// the grid showed 1,860 flagged ones, and the next button along from select-all
+// is Delete. Two parsers for one question will disagree eventually; the only
+// question is which of them is holding the delete button when it happens.
+//
+// Paging and sorting are not here: they belong to the grid, and select-all
+// takes every match by definition.
+func (s *Server) parseBookFilter(r *http.Request) library.Filter {
 	q := r.URL.Query()
-
 	f := library.Filter{
 		Query:       strings.TrimSpace(q.Get("q")),
 		Author:      q.Get("author"),
@@ -21,16 +30,25 @@ func (s *Server) handleListBooks(w http.ResponseWriter, r *http.Request) {
 		Format:      q.Get("format"),
 		NeedsReview: queryBool(r, "needs_review"),
 		Adult:       s.adultVisibility(r),
-		Sort:        library.SortMode(q.Get("sort")),
-		Limit:       queryInt(r, "limit", 60),
-		Cursor:      q.Get("cursor"),
-		WithTotal:   queryBool(r, "total"),
 	}
 	if sh := q.Get("shelf"); sh != "" {
 		if id, err := strconv.ParseInt(sh, 10, 64); err == nil {
 			f.ShelfID = id
 		}
 	}
+	return f
+}
+
+// handleListBooks serves the grid.
+func (s *Server) handleListBooks(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	f := s.parseBookFilter(r)
+	f.Sort = library.SortMode(q.Get("sort"))
+	f.Limit = queryInt(r, "limit", 60)
+	f.Cursor = q.Get("cursor")
+	f.WithTotal = queryBool(r, "total")
+
 	// A text query defaults to relevance ordering; anything else keeps its
 	// stable keyset sort.
 	if f.Sort == "" {

@@ -1,12 +1,6 @@
 package httpapi
 
-import (
-	"net/http"
-	"strconv"
-	"strings"
-
-	"github.com/Karlmit/Klaras-Library/internal/library"
-)
+import "net/http"
 
 // maxSelectAll bounds a "select everything matching" request.
 //
@@ -22,23 +16,9 @@ const maxSelectAll = 20000
 // bulk endpoints stay a simple list of ids, rather than growing a second way
 // of expressing "which books" that could drift from the first.
 func (s *Server) handleBookIDs(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	f := library.Filter{
-		Query:       strings.TrimSpace(q.Get("q")),
-		Author:      q.Get("author"),
-		Tag:         q.Get("tag"),
-		Series:      q.Get("series"),
-		Language:    q.Get("language"),
-		Format:      q.Get("format"),
-		NeedsReview: queryBool(r, "needs_review"),
-	}
-	if sh := q.Get("shelf"); sh != "" {
-		if id, err := strconv.ParseInt(sh, 10, 64); err == nil {
-			f.ShelfID = id
-		}
-	}
-
-	ids, truncated, err := s.lib.BookIDs(r.Context(), f, maxSelectAll)
+	// The same parser the grid uses, so the two cannot disagree about which
+	// books "all" means.
+	ids, truncated, err := s.lib.BookIDs(r.Context(), s.parseBookFilter(r), maxSelectAll)
 	if err != nil {
 		s.fail(w, r, err, "book ids")
 		return
