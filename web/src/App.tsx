@@ -259,6 +259,15 @@ export function App() {
         }}
         isAdmin={user.role === 'admin'}
         open={navOpen}
+        account={{
+          username: user.username,
+          onSettings: () => { closeNav(); setSettingsOpen(true) },
+          onSignOut: async () => {
+            await api.logout()
+            setUser(null)
+            void qc.invalidateQueries()
+          },
+        }}
       />
 
       <main className="main">

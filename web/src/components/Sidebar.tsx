@@ -8,6 +8,9 @@ interface Props {
   /** Drawer state. Only has an effect below the layout breakpoint, where the
    *  sidebar is an overlay rather than a column. */
   open?: boolean
+  /** Shown at the foot of the drawer on narrow screens, where the top bar has
+   *  no room for these and the search field needs the whole width. */
+  account?: { username: string; onSettings: () => void; onSignOut: () => void }
 }
 
 /**
@@ -17,7 +20,7 @@ interface Props {
  * live they cost ~22ms each, and there are five of them, so a page load would
  * spend most of its budget counting things that barely change.
  */
-export function Sidebar({ query, onChange, isAdmin, open = false }: Props) {
+export function Sidebar({ query, onChange, isAdmin, open = false, account }: Props) {
   const { data } = useQuery({ queryKey: ['facets'], queryFn: api.facets, staleTime: 60_000 })
   const { data: shelves } = useQuery({ queryKey: ['shelves'], queryFn: shelvesApi.list })
 
@@ -132,6 +135,17 @@ export function Sidebar({ query, onChange, isAdmin, open = false }: Props) {
         active={query.format}
         onPick={(v) => onChange({ format: v === query.format ? undefined : v })}
       />
+      {account && (
+        <div className="sidebar__account">
+          <div className="navhead">{account.username}</div>
+          <button className="navitem" onClick={account.onSettings}>
+            <span className="navitem__label">Settings</span>
+          </button>
+          <button className="navitem" onClick={account.onSignOut}>
+            <span className="navitem__label">Sign out</span>
+          </button>
+        </div>
+      )}
     </nav>
   )
 }

@@ -693,6 +693,10 @@ select.sort {
 }
 .brand__menu:hover { background: var(--v-50); }
 
+/* Only in the drawer: on a wide screen these live in the top bar, which has
+   room for them. */
+.sidebar__account { display: none; }
+
 .scrim {
     position: fixed; inset: 0;
     background: rgb(0 0 0 / 0.4);
@@ -723,9 +727,25 @@ select.sort {
         overscroll-behavior: contain;
     }
     .sidebar--open { transform: translateX(0); }
+    .sidebar__account {
+        display: block;
+        margin-top: 18px;
+        padding-top: 10px;
+        border-top: 1px solid var(--border);
+    }
 
     .topbar { padding: 0 10px; gap: 8px; }
-    .usermenu__name { display: none; }
+
+    /* Settings and Sign out move into the drawer here. Left in the top bar
+       they squeezed the search field down to about 90px -- wide enough for
+       "Se" and a magnifier -- for two controls used a few times a week, next
+       to the one used constantly. */
+    .usermenu { display: none; }
+    /* The spacer exists only to push the user menu to the right edge. With
+       that gone it is a second flex:1 sibling splitting the row with the
+       search field, which is why the field still only reached halfway. */
+    .topbar__spacer { display: none; }
+    .search { max-width: none; }
 
     /* The toolbar carries a count, filter chips, two buttons and a select.
        On a phone that is more than one line, and it used to push the sort
