@@ -213,11 +213,6 @@ function Card({
     card.pub_year ? String(card.pub_year) : null,
   ].filter(Boolean) as string[]
 
-  const chips = [
-    ...(card.formats ?? []),
-    ...(card.languages ?? []).map((l) => l.toUpperCase()),
-  ]
-
   const cover = coverUrl(card.id, 'detail')
 
   return (
@@ -248,11 +243,6 @@ function Card({
       </header>
 
       <div className="disc__body">
-        {chips.length > 0 && (
-          <div className="disc__chips">
-            {chips.map((c) => <span key={c} className="disc__chip">{c}</span>)}
-          </div>
-        )}
         {card.description
           ? <p className="disc__desc">{card.description}</p>
           : <p className="disc__desc disc__desc--none">No description for this one.</p>}
