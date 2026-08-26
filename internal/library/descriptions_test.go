@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Karlmit/Klaras-Library/internal/library"
+	"github.com/Karlmit/Klaras-Library/internal/provider"
 )
 
 // makeEPUB writes a minimal EPUB whose content pages are exactly what is given.
@@ -189,4 +190,110 @@ func TestFillFromFilesRemembersWhatItTried(t *testing.T) {
 		}
 	}
 	_ = rep
+}
+
+// stubProvider stands in for Google so the failure modes can be exercised
+// without depending on the real service being in a particular mood.
+type stubProvider struct {
+	err  error
+	desc string
+	seen int
+}
+
+func (s *stubProvider) Name() string { return "stub" }
+func (s *stubProvider) Search(ctx context.Context, q provider.Query, limit int) ([]provider.Result, error) {
+	s.seen++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return []provider.Result{{Source: "stub", Title: "Ormen i Essex", Description: blurb}}, nil
+}
+
+// TestUnavailableIsNotRecordedAsNoDescription is the guard for the failure that
+// would have quietly ruined this feature.
+//
+// Google answers overload with 503, not 429. Treated as an ordinary error, the
+// book gets written down as "asked, nothing found" -- and that verdict is
+// permanent, because the whole point of the lookups table is never to ask
+// twice. A bad half hour would have written off thousands of books for good.
+func TestUnavailableIsNotRecordedAsNoDescription(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	id := seedBookWithISBN(t, s, "Ormen i Essex", "9789177955788")
+
+	down := provider.NewSetOf(&stubProvider{err: provider.ErrUnavailable})
+	rep, err := s.FillFromGoogle(ctx, down, 10, false, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.FromGoogle != 0 {
+		t.Errorf("wrote %d descriptions while the provider was down", rep.FromGoogle)
+	}
+	var n int
+	if err := s.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM description_lookups WHERE book_id=$1 AND source='google'`,
+		id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("recorded the book as tried when the provider never answered; " +
+			"it would never be asked again")
+	}
+
+	// When the service recovers, the same book is still in the queue.
+	up := provider.NewSetOf(&stubProvider{desc: blurb})
+	rep, err = s.FillFromGoogle(ctx, up, 10, false, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.FromGoogle != 1 {
+		t.Fatalf("after recovery wrote %d, want 1", rep.FromGoogle)
+	}
+	if got := descOf(t, s, id); len(got) < 80 {
+		t.Errorf("description not written: %q", got)
+	}
+}
+
+// TestQuotaStopsTheRunWithoutRecording: same principle, different refusal.
+func TestQuotaStopsTheRunWithoutRecording(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	id := seedBookWithISBN(t, s, "Ormen i Essex", "9789177955789")
+
+	set := provider.NewSetOf(&stubProvider{err: provider.ErrQuota})
+	rep, err := s.FillFromGoogle(ctx, set, 10, false, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.QuotaHit {
+		t.Error("quota refusal was not reported")
+	}
+	var n int
+	if err := s.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM description_lookups WHERE book_id=$1`, id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Error("recorded a book the provider refused to answer about")
+	}
+}
+
+func seedBookWithISBN(t *testing.T, s *library.Store, title, isbn string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	var id int64
+	if err := s.Pool().QueryRow(ctx, `
+		INSERT INTO books (uuid, title, path, description)
+		VALUES (gen_random_uuid(), $1, 'x/'||$2, NULL) RETURNING id`, title, isbn).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool().Exec(ctx,
+		`INSERT INTO identifiers (book_id, scheme, value) VALUES ($1,'isbn',$2)`, id, isbn); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = s.Pool().Exec(context.Background(), `DELETE FROM books WHERE id=$1`, id) })
+	return id
 }

@@ -81,10 +81,15 @@ func (g *googleBooks) Search(ctx context.Context, q Query, limit int) ([]Result,
 		return nil, err
 	}
 	defer res.Body.Close()
-	if res.StatusCode == http.StatusTooManyRequests {
+	switch {
+	case res.StatusCode == http.StatusTooManyRequests:
 		return nil, ErrQuota
-	}
-	if res.StatusCode != http.StatusOK {
+	case res.StatusCode >= 500:
+		// Google answers overload with 503 far more often than 429. Reported as
+		// a plain error, a caller would record the book as having no
+		// description -- a permanent answer to a temporary problem.
+		return nil, ErrUnavailable
+	case res.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("google books returned %d", res.StatusCode)
 	}
 

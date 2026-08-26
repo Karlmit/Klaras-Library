@@ -14,6 +14,15 @@ import (
 // than burn through the rest of its list getting 429s.
 var ErrQuota = errors.New("provider daily quota exhausted")
 
+// ErrUnavailable is returned when a provider is temporarily refusing service --
+// a 5xx, a timeout, a reset connection.
+//
+// Deliberately distinct from "no match". A caller recording what it has already
+// asked about must not write down "this book has no description" because the
+// service was having a bad minute: that answer is permanent and would never be
+// revisited. Google in particular answers overload with 503, not 429.
+var ErrUnavailable = errors.New("provider temporarily unavailable")
+
 type Result struct {
 	Source      string            `json:"source"`
 	Title       string            `json:"title"`
@@ -128,15 +137,18 @@ func (s *Set) SearchOne(ctx context.Context, q Query, limit int) ([]Result, erro
 		limit = 5
 	}
 	var all []Result
-	var quota bool
+	var quota, unavailable bool
 	var firstErr error
 	for _, p := range s.providers {
 		r, err := p.Search(ctx, q, limit)
-		if errors.Is(err, ErrQuota) {
+		switch {
+		case errors.Is(err, ErrQuota):
 			quota = true
 			continue
-		}
-		if err != nil {
+		case errors.Is(err, ErrUnavailable):
+			unavailable = true
+			continue
+		case err != nil:
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -145,10 +157,12 @@ func (s *Set) SearchOne(ctx context.Context, q Query, limit int) ([]Result, erro
 		all = append(all, r...)
 	}
 	if len(all) == 0 {
-		if quota {
+		switch {
+		case quota:
 			return nil, ErrQuota
-		}
-		if firstErr != nil {
+		case unavailable:
+			return nil, ErrUnavailable
+		case firstErr != nil:
 			return nil, firstErr
 		}
 	}
@@ -159,3 +173,8 @@ func (s *Set) SearchOne(ctx context.Context, q Query, limit int) ([]Result, erro
 	}
 	return all, nil
 }
+
+// NewSetOf builds a Set from explicit providers. For tests, which need to
+// exercise how a caller handles a provider that is down or out of quota
+// without waiting for the real service to be in that state.
+func NewSetOf(ps ...Provider) *Set { return &Set{providers: ps} }

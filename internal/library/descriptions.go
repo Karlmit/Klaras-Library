@@ -51,7 +51,9 @@ type DescriptionReport struct {
 	Asked      int
 	NotFound   int
 	QuotaHit   bool
-	Elapsed    time.Duration
+	// Unavailable counts consecutive 5xx refusals, reset by any real answer.
+	Unavailable int
+	Elapsed     time.Duration
 }
 
 type descCandidate struct {
@@ -182,12 +184,35 @@ func (s *Store) FillFromGoogle(ctx context.Context, set *provider.Set, limit int
 		rep.Asked++
 
 		results, err := set.SearchOne(ctx, provider.Query{ISBN: b.ISBN}, 3)
+
+		// A refusal is not an answer. Quota and unavailability both leave the
+		// book untried, so tomorrow's run asks again; only a provider that
+		// actually replied gets to say a book has no description, because that
+		// verdict is written down and never revisited.
 		if errors.Is(err, provider.ErrQuota) {
 			rep.QuotaHit = true
 			rep.Asked--
 			log.Info("google books daily quota reached; stopping until tomorrow")
 			break
 		}
+		if errors.Is(err, provider.ErrUnavailable) {
+			rep.Asked--
+			rep.Unavailable++
+			// Google answers overload with 503 for minutes at a time. Pushing
+			// on means a long run of nothing; stopping costs one night.
+			if rep.Unavailable >= 5 {
+				log.Info("google books is refusing service; stopping until the next run",
+					"consecutive_5xx", rep.Unavailable)
+				break
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(3 * time.Second):
+			}
+			continue
+		}
+		rep.Unavailable = 0
+
 		text := ""
 		if err == nil {
 			text = pickDescription(results, b.Title)
@@ -398,7 +423,8 @@ func countOf(m map[string]int) int {
 
 func (r *DescriptionReport) String() string {
 	return fmt.Sprintf("files %d, google %d, asked %d, none found %d, quota hit %v, %s",
-		r.FromFiles, r.FromGoogle, r.Asked, r.NotFound, r.QuotaHit, r.Elapsed.Round(time.Millisecond))
+		r.FromFiles, r.FromGoogle, r.Asked, r.NotFound, r.QuotaHit,
+		r.Elapsed.Round(time.Millisecond))
 }
 
 // RunDescriptionFetcher fills in missing descriptions once a day.
