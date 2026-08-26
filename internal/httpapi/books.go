@@ -20,6 +20,7 @@ func (s *Server) handleListBooks(w http.ResponseWriter, r *http.Request) {
 		Language:    q.Get("language"),
 		Format:      q.Get("format"),
 		NeedsReview: queryBool(r, "needs_review"),
+		Adult:       s.adultVisibility(r),
 		Sort:        library.SortMode(q.Get("sort")),
 		Limit:       queryInt(r, "limit", 60),
 		Cursor:      q.Get("cursor"),
@@ -57,6 +58,9 @@ func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
 	id, err := intParam(r, "id")
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "bad book id")
+		return
+	}
+	if s.guardAdult(w, r, id) {
 		return
 	}
 	var userID int64

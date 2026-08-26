@@ -64,6 +64,7 @@ export interface Facets {
   formats: Facet[]
   total_books: number
   needs_review: number
+  adult: number
   refreshed_at?: string
 }
 
@@ -116,6 +117,9 @@ export interface BookQuery {
   format?: string
   shelf?: number
   needs_review?: boolean
+  // 'only' shows nothing but flagged books; the server ignores it for
+  // non-administrators, so this is a view, not a permission.
+  adult?: 'only' | 'include'
   sort?: string
   limit?: number
   cursor?: string
@@ -232,6 +236,11 @@ export const editApi = {
   one: (id: number, edit: BookEdit) =>
     req<Book>(`/api/books/${id}`, { method: 'PATCH', body: JSON.stringify(edit) }),
 
+  setAdult: (ids: number[], adult: boolean) =>
+    req<{ changed: number; adult: boolean }>('/api/books/adult', {
+      method: 'POST',
+      body: JSON.stringify({ ids, adult }),
+    }),
   bulk: (ids: number[], edit: BookEdit, add_tags?: string[], remove_tags?: string[]) =>
     req<{ count: number }>('/api/books/bulk', {
       method: 'POST',

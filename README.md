@@ -417,6 +417,8 @@ klaras passwd USERNAME      Set someone's password
 klaras kobo-resync USERNAME Offer every book to their Kobo again
 klaras relink               Repoint books at files that are on disk under
                             another name
+klaras scan-adult [--dry-run]
+                            Find erotica and hide it from non-administrators
 klaras migrate [up|down|status]
 klaras dev-seed --books N   Synthetic books, for benchmarking on your own hardware
 klaras version
@@ -427,6 +429,35 @@ Everything an operator needs day to day is also in the browser, under
 **Force a full resync** on the Kobo tab — or the `N · resync` button beside an
 account on the Users tab, to reset someone else's device. Reach for the CLI when
 the browser is not an option, not as the normal path.
+
+### Adult content
+
+`klaras scan-adult --dry-run` identifies erotica from metadata and lists it;
+without `--dry-run` it flags what it finds. Flagged books are hidden from every
+account except administrators -- absent from the grid, from search and
+suggestions, from the sidebar counts, from OPDS, and from Kobo sync, and their
+detail, cover and download URLs answer 404 rather than 403, so the flag itself
+stays private.
+
+Administrators see them under **Adult content** in the sidebar, which is their
+own view rather than a filter on the current one. Select books there and
+**Not adult — restore** returns them to the library; a restored book is
+remembered, so a later scan will not flag it again. **Delete** removes the rest,
+files included, and asks you to type the count first.
+
+Two rules, in `internal/library/adult.go`:
+
+- **Publisher**, for imprints that publish nothing else. This is the stronger
+  signal: Lusthuset's catalogue is entirely erotica but the word appears in
+  about 1% of its metadata, so a keyword scan finds almost none of it.
+  Deliberately excludes mixed houses -- flagging a general publisher's crime
+  novels would be worse than missing a few titles.
+- **Keywords**, on title, description, series and tags, and narrow on purpose.
+  "Sex" alone matches sexdagarskriget, sextiotalet and every book about sex
+  education; the Swedish stems for *erotic* are specific enough to stand alone.
+
+Flagging does not touch `updated_at`, so it does not tell every paired Kobo that
+a thousand books have changed.
 
 ### When doctor reports files missing on disk
 

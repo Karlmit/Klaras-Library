@@ -48,9 +48,10 @@ func (s *Store) searchBooks(ctx context.Context, f Filter) (*BookPage, error) {
 		         similarity(f_unaccent(b.authors_flat), q.raw)
 		       ) AS score
 		FROM books b, q
-		WHERE b.search_tsv @@ q.ts
+		WHERE NOT b.adult
+		  AND (b.search_tsv @@ q.ts
 		   OR f_unaccent(b.title) %% q.raw
-		   OR f_unaccent(b.authors_flat) %% q.raw
+		   OR f_unaccent(b.authors_flat) %% q.raw)
 		ORDER BY score DESC, b.title_sort, b.id
 		LIMIT $2 OFFSET $3`, searchConfig)
 
@@ -107,7 +108,7 @@ func (s *Store) Suggest(ctx context.Context, term string, limit int) ([]Suggesti
 	rows, err := s.pool.Query(ctx, `
 		(SELECT 'book' AS kind, b.title AS value, b.id,
 		        similarity(f_unaccent(b.title), f_unaccent($1)) AS sim
-		   FROM books b WHERE f_unaccent(b.title) % f_unaccent($1)
+		   FROM books b WHERE NOT b.adult AND f_unaccent(b.title) % f_unaccent($1)
 		   ORDER BY sim DESC, b.title_sort LIMIT $2)
 		UNION ALL
 		(SELECT 'author', a.name, a.id, similarity(f_unaccent(a.name), f_unaccent($1))

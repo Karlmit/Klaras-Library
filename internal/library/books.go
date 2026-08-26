@@ -106,6 +106,19 @@ var sortSpecs = map[SortMode]sortSpec{
 }
 
 // Filter narrows a listing.
+// AdultVisibility says what a query should do with books flagged as adult.
+type AdultVisibility int
+
+const (
+	// AdultHide excludes them. This is the zero value on purpose: a query that
+	// has not considered the question must not be the one that leaks.
+	AdultHide AdultVisibility = iota
+	// AdultOnly returns nothing else. The administrators' review screen.
+	AdultOnly
+	// AdultInclude ignores the flag entirely.
+	AdultInclude
+)
+
 type Filter struct {
 	Query       string
 	Author      string
@@ -115,10 +128,15 @@ type Filter struct {
 	Format      string
 	ShelfID     int64
 	NeedsReview bool
-	Sort        SortMode
-	Limit       int
-	Cursor      string
-	WithTotal   bool
+
+	// Adult decides how flagged books are treated. The zero value hides them,
+	// so a caller that forgets to think about it cannot leak them -- which is
+	// the whole point of the flag.
+	Adult     AdultVisibility
+	Sort      SortMode
+	Limit     int
+	Cursor    string
+	WithTotal bool
 }
 
 // cursor carries the position of the last row of the previous page.
@@ -208,6 +226,14 @@ func (s *Store) ListBooks(ctx context.Context, f Filter) (*BookPage, error) {
 	}
 	if f.NeedsReview {
 		where = append(where, "b.needs_review")
+	}
+	switch f.Adult {
+	case AdultOnly:
+		where = append(where, "b.adult")
+	case AdultInclude:
+		// No predicate: an administrator browsing everything.
+	default:
+		where = append(where, "NOT b.adult")
 	}
 
 	// Everything added so far describes the filter. The cursor conditions come
@@ -358,6 +384,13 @@ func (s *Store) BookIDs(ctx context.Context, f Filter, limit int) ([]int64, bool
 	}
 	if f.Language != "" {
 		where = append(where, "b.languages @> ARRAY["+push(f.Language)+"]")
+	}
+	switch f.Adult {
+	case AdultOnly:
+		where = append(where, "b.adult")
+	case AdultInclude:
+	default:
+		where = append(where, "NOT b.adult")
 	}
 	if f.Format != "" {
 		where = append(where, "EXISTS (SELECT 1 FROM book_files bf WHERE bf.book_id=b.id AND bf.format="+

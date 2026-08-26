@@ -74,6 +74,11 @@ func (e *Engine) changedBooks(ctx context.Context, userID int64, since time.Time
 		       (ks.book_id IS NULL) AS is_new
 		FROM synced sy
 		JOIN books b ON b.id = sy.book_id
+		-- Adult books never reach a non-administrator's device. No book on a
+		-- synced shelf is flagged today; this is here so that adding one later
+		-- cannot quietly push it to a family reader.
+		AND (NOT b.adult OR EXISTS (
+		        SELECT 1 FROM users u WHERE u.id = $1 AND u.role = 'admin'))
 		LEFT JOIN publishers p       ON p.id = b.publisher_id
 		LEFT JOIN kobo_synced_books ks ON ks.book_id = b.id AND ks.user_id = $1
 		                              AND ks.confirmed

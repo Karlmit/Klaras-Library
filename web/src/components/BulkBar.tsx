@@ -5,6 +5,9 @@ import { deleteApi, editApi, shelvesApi, type BookEdit } from '../api'
 interface Props {
   selected: Set<number>
   onClear: () => void
+  /** True on the administrators' adult-content screen, which needs its own
+   *  actions: restore a book caught by mistake, and delete the rest. */
+  reviewingAdult?: boolean
 }
 
 /**
@@ -14,7 +17,7 @@ interface Props {
  * gap for a library this size: 1,115 books here carry a merged author name and
  * fixing those one at a time is not realistic.
  */
-export function BulkBar({ selected, onClear }: Props) {
+export function BulkBar({ selected, onClear, reviewingAdult = false }: Props) {
   const qc = useQueryClient()
   const ids = [...selected]
   const [panel, setPanel] = useState<'none' | 'tags' | 'author' | 'shelf' | 'language'>('none')
@@ -40,6 +43,12 @@ export function BulkBar({ selected, onClear }: Props) {
 
   const del = useMutation({
     mutationFn: (keepFiles: boolean) => deleteApi.bulk(ids, keepFiles),
+    onSuccess: done,
+    onError: (e) => setError((e as Error).message),
+  })
+
+  const unflag = useMutation({
+    mutationFn: () => editApi.setAdult(ids, false),
     onSuccess: done,
     onError: (e) => setError((e as Error).message),
   })
@@ -72,13 +81,24 @@ export function BulkBar({ selected, onClear }: Props) {
           <button className="btn btn--sm btn--ghost" onClick={() => setPanel('language')}>
             Set language
           </button>
-          <button
-            className="btn btn--sm btn--ghost"
-            onClick={() => bulk.mutate({ edit: { needs_review: false } })}
-            title="Clear the review flag on the selected books"
-          >
-            Mark reviewed
-          </button>
+          {reviewingAdult ? (
+            <button
+              className="btn btn--sm btn--ghost"
+              disabled={unflag.isPending}
+              onClick={() => unflag.mutate()}
+              title="These are not adult content. They return to the library for everyone."
+            >
+              {unflag.isPending ? 'Restoring…' : 'Not adult — restore'}
+            </button>
+          ) : (
+            <button
+              className="btn btn--sm btn--ghost"
+              onClick={() => bulk.mutate({ edit: { needs_review: false } })}
+              title="Clear the review flag on the selected books"
+            >
+              Mark reviewed
+            </button>
+          )}
           <button
             className="btn btn--sm btn--ghost btn--danger"
             disabled={del.isPending}

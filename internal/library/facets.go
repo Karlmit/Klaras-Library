@@ -22,6 +22,7 @@ type Facets struct {
 	Formats     []Facet `json:"formats"`
 	TotalBooks  int64   `json:"total_books"`
 	NeedsReview int64   `json:"needs_review"`
+	Adult       int64   `json:"adult"`
 	RefreshedAt string  `json:"refreshed_at,omitempty"`
 }
 
@@ -75,6 +76,8 @@ func (s *Store) Facets(ctx context.Context, limit int) (*Facets, error) {
 				out.TotalBooks = n
 			case "needs_review":
 				out.NeedsReview = n
+			case "adult":
+				out.Adult = n
 			}
 		}
 	}

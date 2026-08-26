@@ -235,7 +235,7 @@ export function App() {
         </div>
       </header>
 
-      <Sidebar query={query} onChange={patchQuery} />
+      <Sidebar query={query} onChange={patchQuery} isAdmin={user.role === 'admin'} />
 
       <main className="main">
         <div className="toolbar">
@@ -291,7 +291,7 @@ export function App() {
           selected={picked}
           onToggleSelect={togglePick}
         />
-        <BulkBar selected={picked} onClear={clearPicked} />
+        <BulkBar selected={picked} onClear={clearPicked} reviewingAdult={query.adult === 'only'} />
       </main>
 
       {selected != null && (

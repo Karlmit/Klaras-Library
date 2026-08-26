@@ -72,6 +72,8 @@ func run() error {
 		return cmdUsers()
 	case "passwd":
 		return cmdPasswd()
+	case "scan-adult":
+		return cmdScanAdult()
 	case "relink":
 		return cmdRelink()
 	case "kobo-resync":
@@ -107,6 +109,7 @@ Usage:
   klaras users            List accounts
   klaras passwd USERNAME  Set an account's password
   klaras relink [--dry-run]
+  klaras scan-adult [--dry-run]
   klaras kobo-resync USERNAME
                           Forget what a user's devices have been sent, so the
                           next sync re-announces every book as new
@@ -812,6 +815,52 @@ func cmdKoboResync() error {
 			"On the device, sync again -- it may take a little longer than usual.\n"+
 			"The same button is in Settings -> Kobo in the browser.\n",
 		n, username)
+	return nil
+}
+
+// cmdScanAdult finds erotica and hides it from everyone but administrators.
+func cmdScanAdult() error {
+	fs := flag.NewFlagSet("scan-adult", flag.ExitOnError)
+	dryRun := fs.Bool("dry-run", false, "list what would be flagged, change nothing")
+	quiet := fs.Bool("quiet", false, "counts only, no per-book listing")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg)
+	ctx := context.Background()
+
+	db, err := store.Open(ctx, cfg.DatabaseURL, cfg.DBMaxConns, log)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	var out io.Writer
+	if !*quiet {
+		out = os.Stdout
+	}
+	lib := library.New(db.Pool)
+	rep, err := lib.ScanAdult(ctx, *dryRun, out)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "\n%s\n",
+		map[bool]string{true: "DRY RUN (nothing was changed)", false: "Flagged"}[*dryRun])
+	for _, reason := range rep.SortedReasons() {
+		fmt.Fprintf(os.Stderr, "  %-34s %d\n", reason, rep.ByReason[reason])
+	}
+	fmt.Fprintf(os.Stderr, "  %-34s %d\n", "TOTAL", rep.Candidates)
+	if !*dryRun {
+		fmt.Fprintf(os.Stderr, "\nHidden from every account except administrators.\n"+
+			"Review them in Settings -> Adult content, where you can clear the flag\n"+
+			"on anything caught by mistake, or delete the rest.\n")
+	}
 	return nil
 }
 

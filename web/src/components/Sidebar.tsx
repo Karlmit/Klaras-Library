@@ -4,6 +4,7 @@ import { api, shelvesApi, type BookQuery } from '../api'
 interface Props {
   query: BookQuery
   onChange: (patch: Partial<BookQuery>) => void
+  isAdmin: boolean
 }
 
 /**
@@ -13,7 +14,7 @@ interface Props {
  * live they cost ~22ms each, and there are five of them, so a page load would
  * spend most of its budget counting things that barely change.
  */
-export function Sidebar({ query, onChange }: Props) {
+export function Sidebar({ query, onChange, isAdmin }: Props) {
   const { data } = useQuery({ queryKey: ['facets'], queryFn: api.facets, staleTime: 60_000 })
   const { data: shelves } = useQuery({ queryKey: ['shelves'], queryFn: shelvesApi.list })
 
@@ -26,11 +27,12 @@ export function Sidebar({ query, onChange }: Props) {
       format: undefined,
       needs_review: false,
       shelf: undefined,
+      adult: undefined,
     })
 
   const noFilter =
     !query.author && !query.tag && !query.series && !query.language && !query.format &&
-    !query.needs_review && !query.shelf
+    !query.needs_review && !query.shelf && !query.adult
 
   return (
     <nav className="sidebar" aria-label="Library filters">
@@ -42,6 +44,30 @@ export function Sidebar({ query, onChange }: Props) {
         <span className="navitem__label">All books</span>
         <span className="navitem__count">{data?.total_books?.toLocaleString('sv-SE') ?? ''}</span>
       </button>
+      {isAdmin && !!data?.adult && (
+        <button
+          className={`navitem ${query.adult === 'only' ? 'navitem--active' : ''}`}
+          onClick={() =>
+            onChange(
+              query.adult === 'only'
+                ? { adult: undefined }
+                : {
+                    adult: 'only',
+                    // The flagged set is its own view, not a filter on the
+                    // current one: arriving here with an author still selected
+                    // would show an empty page and look like nothing was found.
+                    author: undefined, tag: undefined, series: undefined,
+                    language: undefined, format: undefined, shelf: undefined,
+                    needs_review: false, q: undefined,
+                  },
+            )
+          }
+          title="Erotica, hidden from every account except administrators. Clear the flag on anything caught by mistake, or delete the rest."
+        >
+          <span className="navitem__label">Adult content</span>
+          <span className="navitem__count">{data.adult.toLocaleString('sv-SE')}</span>
+        </button>
+      )}
       {!!data?.needs_review && (
         <button
           className={`navitem ${query.needs_review ? 'navitem--active' : ''}`}

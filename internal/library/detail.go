@@ -45,6 +45,8 @@ type Book struct {
 	Files         []BookFile   `json:"files"`
 	Identifiers   []Identifier `json:"identifiers"`
 	NeedsReview   bool         `json:"needs_review"`
+	Adult         bool         `json:"adult"`
+	AdultReason   string       `json:"adult_reason,omitempty"`
 	ReviewReasons []string     `json:"review_reasons,omitempty"`
 	AddedAt       string       `json:"added_at"`
 	UpdatedAt     string       `json:"updated_at"`
@@ -67,14 +69,16 @@ func (s *Store) GetBook(ctx context.Context, id int64, userID int64) (*Book, err
 		SELECT b.id, b.uuid, b.title, b.title_sort, b.author_names, b.author_sort,
 		       b.description, b.series_name, b.series_index, p.name, b.pubdate,
 		       b.rating, b.tag_names, b.languages, b.path, b.has_cover,
-		       b.needs_review, b.review_reasons, b.added_at, b.updated_at
+		       b.needs_review, b.review_reasons, b.added_at, b.updated_at,
+		       b.adult, COALESCE(b.adult_reason,'')
 		FROM books b
 		LEFT JOIN publishers p ON p.id = b.publisher_id
 		WHERE b.id = $1`, id).
 		Scan(&b.ID, &b.UUID, &b.Title, &b.TitleSort, &b.Authors, &b.AuthorSort,
 			&b.Description, &b.Series, &b.SeriesIndex, &b.Publisher, &pub,
 			&b.Rating, &b.Tags, &b.Languages, &b.Path, &b.HasCover,
-			&b.NeedsReview, &b.ReviewReasons, &added, &updated)
+			&b.NeedsReview, &b.ReviewReasons, &added, &updated,
+			&b.Adult, &b.AdultReason)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

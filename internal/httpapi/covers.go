@@ -22,6 +22,9 @@ func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad book id")
 		return
 	}
+	if s.guardAdult(w, r, id) {
+		return
+	}
 	sizeName := chi.URLParam(r, "size")
 	if sizeName == "" {
 		sizeName = "grid"

@@ -20,6 +20,9 @@ func (s *Server) handleDownloadBook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad book id")
 		return
 	}
+	if s.guardAdult(w, r, id) {
+		return
+	}
 	format := strings.ToUpper(chi.URLParam(r, "format"))
 
 	info, err := s.lib.PathInfo(r.Context(), id)

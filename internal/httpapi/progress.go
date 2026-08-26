@@ -21,6 +21,9 @@ func (s *Server) handleGetProgress(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad book id")
 		return
 	}
+	if s.guardAdult(w, r, id) {
+		return
+	}
 	u := s.currentUser(r)
 
 	var p ReadingProgress
@@ -49,6 +52,9 @@ func (s *Server) handlePutProgress(w http.ResponseWriter, r *http.Request) {
 	id, err := intParam(r, "id")
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "bad book id")
+		return
+	}
+	if s.guardAdult(w, r, id) {
 		return
 	}
 	u := s.currentUser(r)

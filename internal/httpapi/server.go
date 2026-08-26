@@ -183,6 +183,12 @@ func (s *Server) routes() {
 				r.Post("/users", s.handleCreateUser)
 				r.Patch("/users/{id}", s.handleUpdateUser)
 				r.Put("/users/{id}/password", s.handleSetUserPassword)
+
+				// Adult content is an administrators-only concern by
+				// definition: the flag decides who may see a book, so being
+				// able to change it must not be something a reader has.
+				r.Put("/books/{id}/adult", s.handleSetAdult)
+				r.Post("/books/adult", s.handleSetAdultMany)
 			})
 		})
 	})
