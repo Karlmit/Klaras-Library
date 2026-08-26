@@ -722,3 +722,100 @@ func TestCaseOnlyDifferenceIsFiledApart(t *testing.T) {
 		}
 	}
 }
+
+// TestApplyRefusesWhenASourceFileIsMissing guards the failure that broke eight
+// books during the real reorganize.
+//
+// journalledMove treats a missing source as nothing to do, which is right when
+// re-running after a crash. Apply then went on to rewrite books.path and
+// book_files.filename anyway, so the row described a location the file had
+// never reached -- and the run reported no failures. Calibre truncates long
+// filenames and can leave a trailing space before the extension that the
+// imported name does not carry, so "the file is not where the row says" is a
+// real state, not a hypothetical.
+func TestApplyRefusesWhenASourceFileIsMissing(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+
+	// The recorded name gains a space the file on disk does not have.
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE book_files SET filename='book .epub' WHERE book_id=$1`, f.id); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := f.st.PlanFor(ctx, f.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.st.Apply(ctx, plan); err == nil {
+		t.Fatal("Apply succeeded with a source file that does not exist")
+	}
+
+	var path string
+	var review bool
+	if err := f.pool.QueryRow(ctx,
+		`SELECT path, needs_review FROM books WHERE id=$1`, f.id).Scan(&path, &review); err != nil {
+		t.Fatal(err)
+	}
+	if path != "Old Author/Old Title" {
+		t.Errorf("book moved to %q despite the failure; it must stay where its files are", path)
+	}
+	if !review {
+		t.Error("book was not flagged for review")
+	}
+	// The real file is untouched.
+	if _, err := os.Stat(filepath.Join(f.root, "Old Author", "Old Title", "book.epub")); err != nil {
+		t.Errorf("original file disturbed: %v", err)
+	}
+}
+
+// TestRelinkFindsAFileRenamedOutFromUnderTheDatabase repairs the state above.
+//
+// Matching is by size and extension, because the name is the thing that is
+// wrong.
+func TestRelinkFindsAFileRenamedOutFromUnderTheDatabase(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+
+	// setup wrote "content of book.epub" -- 20 bytes.
+	want := int64(len("content of book.epub"))
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE book_files SET filename='book .epub', size_bytes=$2 WHERE book_id=$1`,
+		f.id, want); err != nil {
+		t.Fatal(err)
+	}
+
+	missing, err := f.st.Missing(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing) != 1 {
+		t.Fatalf("Missing() found %d absent files, want 1", len(missing))
+	}
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	rep, err := f.st.Relink(ctx, false, io.Discard, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Relinked != 1 || rep.Ambiguous != 0 || rep.Unresolved != 0 {
+		t.Fatalf("relink report: %+v, want 1 relinked and nothing else", rep)
+	}
+
+	var name string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT filename FROM book_files WHERE book_id=$1`, f.id).Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	if name != "book.epub" {
+		t.Errorf("filename = %q, want the name actually on disk", name)
+	}
+
+	after, err := f.st.Missing(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != 0 {
+		t.Errorf("still missing after relink: %+v", after)
+	}
+}

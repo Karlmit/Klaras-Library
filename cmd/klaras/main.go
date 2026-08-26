@@ -72,6 +72,8 @@ func run() error {
 		return cmdUsers()
 	case "passwd":
 		return cmdPasswd()
+	case "relink":
+		return cmdRelink()
 	case "kobo-resync":
 		return cmdKoboResync()
 	case "version":
@@ -104,6 +106,7 @@ Usage:
                           Undo file moves made since TIME, using the journal
   klaras users            List accounts
   klaras passwd USERNAME  Set an account's password
+  klaras relink [--dry-run]
   klaras kobo-resync USERNAME
                           Forget what a user's devices have been sent, so the
                           next sync re-announces every book as new
@@ -809,6 +812,54 @@ func cmdKoboResync() error {
 			"On the device, sync again -- it may take a little longer than usual.\n"+
 			"The same button is in Settings -> Kobo in the browser.\n",
 		n, username)
+	return nil
+}
+
+// cmdRelink repairs books whose files are on disk under a different name.
+func cmdRelink() error {
+	fs := flag.NewFlagSet("relink", flag.ExitOnError)
+	dryRun := fs.Bool("dry-run", false, "report what would be relinked, change nothing")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	db, err := store.Open(ctx, cfg.DatabaseURL, cfg.DBMaxConns, log)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	files := filestore.New(cfg.LibraryRoot, filestore.Template{
+		WithSeries: cfg.PathTemplateSeries,
+		Plain:      cfg.PathTemplatePlain,
+		File:       cfg.FileTemplate,
+	}, db.Pool, log)
+
+	rep, err := files.Relink(ctx, *dryRun, os.Stderr, log)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "\n%s in %s\n",
+		map[bool]string{true: "DRY RUN (nothing was changed)", false: "Relinked"}[*dryRun],
+		rep.Elapsed.Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "  missing on disk %d\n", rep.Missing)
+	fmt.Fprintf(os.Stderr, "  %s      %d\n",
+		map[bool]string{true: "resolvable", false: "relinked  "}[*dryRun], rep.Relinked)
+	fmt.Fprintf(os.Stderr, "  ambiguous       %d\n", rep.Ambiguous)
+	fmt.Fprintf(os.Stderr, "  unresolved      %d\n", rep.Unresolved)
+	if rep.Relinked > 0 && !*dryRun {
+		fmt.Fprintf(os.Stderr,
+			"\nRelinked books now point at wherever their file actually is, which may be\n"+
+				"an old folder. Run reorganize again to file them properly.\n")
+	}
 	return nil
 }
 

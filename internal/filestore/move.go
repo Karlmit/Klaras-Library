@@ -186,6 +186,38 @@ func (s *Store) Apply(ctx context.Context, p *Plan) error {
 		}
 	}
 
+	// Check every source before moving any of them.
+	//
+	// journalledMove treats a missing source as nothing to do, which is right
+	// when re-running after a crash and wrong here: the book's row would still
+	// be rewritten to the new location, leaving the database pointing at a file
+	// that never moved. Calibre truncates long filenames and can leave a
+	// trailing space before the extension that the imported name does not
+	// carry, so "missing" really happens -- eight books in this library.
+	//
+	// Refusing the whole book keeps it consistent where it already is, and
+	// makes the reorganize report count it instead of passing silently.
+	var absent []string
+	for i := range p.Files {
+		src := filepath.Join(fromAbs, p.Files[i].FromName)
+		if _, err := os.Stat(src); err != nil {
+			if os.IsNotExist(err) {
+				absent = append(absent, p.Files[i].FromName)
+				continue
+			}
+			return fmt.Errorf("stat %s: %w", src, err)
+		}
+	}
+	if len(absent) > 0 {
+		if _, err := s.pool.Exec(ctx,
+			`UPDATE books SET needs_review = true WHERE id = $1`, p.BookID); err != nil {
+			s.log.Error("could not flag book for review", "book", p.BookID, "err", err)
+		}
+		return fmt.Errorf("book %d: not on disk in %s: %s (left in place; "+
+			"the recorded name may differ from the file, and the book is flagged for review)",
+			p.BookID, p.FromDir, strings.Join(absent, ", "))
+	}
+
 	if err := os.MkdirAll(toAbs, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", toDir, err)
 	}

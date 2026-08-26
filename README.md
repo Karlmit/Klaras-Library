@@ -415,6 +415,8 @@ klaras doctor               Report library problems (read-only)
 klaras users                List accounts, their roles and paired devices
 klaras passwd USERNAME      Set someone's password
 klaras kobo-resync USERNAME Offer every book to their Kobo again
+klaras relink               Repoint books at files that are on disk under
+                            another name
 klaras migrate [up|down|status]
 klaras dev-seed --books N   Synthetic books, for benchmarking on your own hardware
 klaras version
@@ -425,6 +427,23 @@ Everything an operator needs day to day is also in the browser, under
 **Force a full resync** on the Kobo tab — or the `N · resync` button beside an
 account on the Users tab, to reset someone else's device. Reach for the CLI when
 the browser is not an option, not as the normal path.
+
+### When doctor reports files missing on disk
+
+`klaras doctor` compares every recorded file against the filesystem. A non-zero
+"files missing on disk" usually does not mean anything was lost -- the common
+cause is a name that differs from the real one by a character nobody can see.
+Calibre truncates long filenames and can leave a trailing space before the
+extension, so the imported name and the file drift apart.
+
+`klaras relink --dry-run` finds each absent file by size and extension rather
+than by name, since the name is the thing that is wrong, and reports what it
+would repoint. Without `--dry-run` it commits. A book is only relinked when
+exactly one file of the right size and type is unaccounted for anywhere in the
+library; anything ambiguous is reported and left alone.
+
+Relinked books point at wherever their file actually is, which may be an old
+folder, so run `reorganize` again afterwards to file them properly.
 
 ### When a Kobo syncs but no books arrive
 
