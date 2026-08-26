@@ -11,10 +11,13 @@ import (
 
 // googleBooks queries the public Google Books API.
 //
-// No API key is used. The keyless quota is per-IP and generous enough for
-// occasional lookups from one household, and requiring a key would mean a
-// setup step most self-hosters would never complete.
-type googleBooks struct{ lang string }
+// A key is optional. Without one the quota is shared per-IP and is exhausted
+// quickly -- filling thousands of missing descriptions runs into HTTP 429 --
+// so bulk work wants a key, while an occasional manual lookup does not.
+type googleBooks struct {
+	lang string
+	key  string
+}
 
 func (g *googleBooks) Name() string { return "Google Books" }
 
@@ -64,6 +67,9 @@ func (g *googleBooks) Search(ctx context.Context, q Query, limit int) ([]Result,
 	if g.lang != "" {
 		v.Set("langRestrict", twoLetter(g.lang))
 	}
+	if g.key != "" {
+		v.Set("key", g.key)
+	}
 	u.RawQuery = v.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
@@ -75,6 +81,9 @@ func (g *googleBooks) Search(ctx context.Context, q Query, limit int) ([]Result,
 		return nil, err
 	}
 	defer res.Body.Close()
+	if res.StatusCode == http.StatusTooManyRequests {
+		return nil, ErrQuota
+	}
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("google books returned %d", res.StatusCode)
 	}

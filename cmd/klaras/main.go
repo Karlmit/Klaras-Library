@@ -72,6 +72,8 @@ func run() error {
 		return cmdUsers()
 	case "passwd":
 		return cmdPasswd()
+	case "fetch-descriptions":
+		return cmdFetchDescriptions()
 	case "scan-adult":
 		return cmdScanAdult()
 	case "relink":
@@ -110,6 +112,7 @@ Usage:
   klaras passwd USERNAME  Set an account's password
   klaras relink [--dry-run]
   klaras scan-adult [--dry-run]
+  klaras fetch-descriptions [--dry-run] [--limit N] [--files-only]
   klaras kobo-resync USERNAME
                           Forget what a user's devices have been sent, so the
                           next sync re-announces every book as new
@@ -219,6 +222,17 @@ func cmdServe() error {
 		go ingestSvc.Run(ctx, 60*time.Second)
 	}
 	go lib.RunFacetRefresher(ctx, 30*time.Second, log)
+
+	// Missing descriptions fill themselves in over the following days: the
+	// books' own files every night, and Google Books up to its daily quota
+	// when a key is configured.
+	{
+		var set *provider.Set
+		if cfg.GoogleBooksKey != "" {
+			set = provider.NewSetWithKey("swe", cfg.GoogleBooksKey)
+		}
+		go lib.RunDescriptionFetcher(ctx, cfg.LibraryRoot, set, cfg.DescriptionsPerDay, log)
+	}
 
 	// Prune expired lockout entries, so a long guessing run against random
 	// usernames cannot grow the limiter's map without bound.
@@ -815,6 +829,77 @@ func cmdKoboResync() error {
 			"On the device, sync again -- it may take a little longer than usual.\n"+
 			"The same button is in Settings -> Kobo in the browser.\n",
 		n, username)
+	return nil
+}
+
+// cmdFetchDescriptions fills in missing blurbs, files first then Google.
+func cmdFetchDescriptions() error {
+	fs := flag.NewFlagSet("fetch-descriptions", flag.ExitOnError)
+	dryRun := fs.Bool("dry-run", false, "report what would be filled, change nothing")
+	limit := fs.Int("limit", 0, "cap both passes (default: everything from files, the daily quota from Google)")
+	filesOnly := fs.Bool("files-only", false, "read the books' own files, do not call Google")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	db, err := store.Open(ctx, cfg.DatabaseURL, cfg.DBMaxConns, log)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	lib := library.New(db.Pool)
+
+	total, missing, withISBN, err := lib.MissingDescriptionCount(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "%d books, %d without a description (%d of those have an ISBN)\n",
+		total, missing, withISBN)
+
+	fileLimit := 1000000
+	if *limit > 0 {
+		fileLimit = *limit
+	}
+	fileRep, err := lib.FillFromFiles(ctx, cfg.LibraryRoot, fileLimit, *dryRun, log)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "  from the books' own files: %d\n", fileRep.FromFiles)
+
+	if *filesOnly {
+		return nil
+	}
+	if cfg.GoogleBooksKey == "" {
+		fmt.Fprintf(os.Stderr,
+			"\nNo KLARAS_GOOGLE_BOOKS_KEY set, so Google is not queried. The keyless\n"+
+				"quota is shared per address and runs out immediately at this volume.\n"+
+				"A key is free at https://console.cloud.google.com/apis/credentials\n")
+		return nil
+	}
+	n := *limit
+	if n <= 0 {
+		n = cfg.DescriptionsPerDay
+	}
+	set := provider.NewSetWithKey("swe", cfg.GoogleBooksKey)
+	gRep, err := lib.FillFromGoogle(ctx, set, n, *dryRun, log)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "  from Google Books:         %d  (asked %d, no match %d)\n",
+		gRep.FromGoogle, gRep.Asked, gRep.NotFound)
+	if gRep.QuotaHit {
+		fmt.Fprintf(os.Stderr, "  daily quota reached; the next run continues where this stopped\n")
+	}
+	_, left, _, _ := lib.MissingDescriptionCount(ctx)
+	fmt.Fprintf(os.Stderr, "\nStill without a description: %d\n", left)
 	return nil
 }
 

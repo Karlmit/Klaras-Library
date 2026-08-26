@@ -419,6 +419,8 @@ klaras relink               Repoint books at files that are on disk under
                             another name
 klaras scan-adult [--dry-run]
                             Find erotica and hide it from non-administrators
+klaras fetch-descriptions [--dry-run] [--limit N] [--files-only]
+                            Fill in missing descriptions
 klaras migrate [up|down|status]
 klaras dev-seed --books N   Synthetic books, for benchmarking on your own hardware
 klaras version
@@ -429,6 +431,33 @@ Everything an operator needs day to day is also in the browser, under
 **Force a full resync** on the Kobo tab — or the `N · resync` button beside an
 account on the Users tab, to reset someone else's device. Reach for the CLI when
 the browser is not an option, not as the normal path.
+
+### Missing descriptions
+
+Roughly half an imported library arrives with no description, which makes both
+the book page and **Random book** thin. Two sources fill them in, and the server
+works through them on its own once a day.
+
+**The books' own files**, first, because they are free and authoritative.
+Several Swedish publishers ship the back-cover text as a content page -- named
+`bookinfo` or `about_book`, or marked with Storytel's *HOPPA ÖVER INTROTEXT*.
+About one book in eleven has one. Colophons and author biographies are refused;
+they sit in the same place and are not blurbs.
+
+**Google Books**, second, for books with an ISBN. Set `KLARAS_GOOGLE_BOOKS_KEY`
+to a free key from the [Google Cloud console](https://console.cloud.google.com/apis/credentials)
+and restrict it to the Books API. Around half of Swedish ISBNs come back with a
+Swedish description. Without a key only the keyless per-address quota is
+available, which is exhausted almost immediately at this volume.
+
+Matching is on ISBN alone, never on title and author, and the returned title
+still has to resemble the one on file. A wrong blurb is worse than none: it
+reads as authoritative and nobody re-checks it.
+
+The free quota is 1,000 lookups a day, so a large library takes a week or two.
+Every attempt is recorded, successful or not, so each night continues where the
+last stopped instead of re-asking the same first thousand. `klaras
+fetch-descriptions` runs the same thing by hand.
 
 ### Shelves
 

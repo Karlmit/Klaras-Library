@@ -3,11 +3,17 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 )
 
 // Result is one candidate match from a provider.
+// ErrQuota is returned when a provider refuses because its daily allowance is
+// spent. A caller filling thousands of records needs to stop for the day rather
+// than burn through the rest of its list getting 429s.
+var ErrQuota = errors.New("provider daily quota exhausted")
+
 type Result struct {
 	Source      string            `json:"source"`
 	Title       string            `json:"title"`
@@ -54,9 +60,13 @@ type Set struct {
 // setup step that requires registering for a key is a setup step most people
 // never complete. Google Books has better coverage of Swedish titles; Open
 // Library is a good second opinion and has better series data.
-func NewSet(lang string) *Set {
+func NewSet(lang string) *Set { return NewSetWithKey(lang, "") }
+
+// NewSetWithKey is NewSet with a Google Books API key, which raises the daily
+// quota from the shared per-IP allowance to 1,000 lookups of your own.
+func NewSetWithKey(lang, googleKey string) *Set {
 	return &Set{providers: []Provider{
-		&googleBooks{lang: lang},
+		&googleBooks{lang: lang, key: googleKey},
 		&openLibrary{},
 	}}
 }
@@ -103,4 +113,49 @@ func (s *Set) Names() []string {
 		out = append(out, p.Name())
 	}
 	return out
+}
+
+// SearchOne is Search with the errors kept.
+//
+// Search deliberately swallows a provider's failure and returns whatever the
+// others found, which is right for a person clicking "look this up" -- one
+// slow provider should not cost them the result. It is wrong for a job working
+// through ten thousand books: a quota refusal has to stop the run, not read as
+// "no match" and burn the rest of the list on 429s while recording every book
+// as tried.
+func (s *Set) SearchOne(ctx context.Context, q Query, limit int) ([]Result, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	var all []Result
+	var quota bool
+	var firstErr error
+	for _, p := range s.providers {
+		r, err := p.Search(ctx, q, limit)
+		if errors.Is(err, ErrQuota) {
+			quota = true
+			continue
+		}
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		all = append(all, r...)
+	}
+	if len(all) == 0 {
+		if quota {
+			return nil, ErrQuota
+		}
+		if firstErr != nil {
+			return nil, firstErr
+		}
+	}
+	scoreAll(all, q)
+	sortByScore(all)
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	return all, nil
 }

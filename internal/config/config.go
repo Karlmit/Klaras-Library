@@ -33,6 +33,11 @@ type Config struct {
 	ExternalURL string
 
 	// Managed tree layout. See filestore for the available placeholders.
+	// Google Books allows 1,000 lookups a day free with a key and far fewer
+	// without one, so the fetcher is paced rather than let loose.
+	GoogleBooksKey     string
+	DescriptionsPerDay int
+
 	PathTemplateSeries string
 	PathTemplatePlain  string
 	FileTemplate       string
@@ -64,6 +69,9 @@ func Load() (*Config, error) {
 		CacheDir:    env("CACHE_DIR", "/cache"),
 
 		ExternalURL: strings.TrimRight(env("EXTERNAL_URL", ""), "/"),
+
+		GoogleBooksKey:     env("GOOGLE_BOOKS_KEY", ""),
+		DescriptionsPerDay: envInt("DESCRIPTIONS_PER_DAY", 900),
 
 		PathTemplateSeries: env("PATH_TEMPLATE_SERIES", "{author_sort}/{series}/{series_index} - {title}"),
 		PathTemplatePlain:  env("PATH_TEMPLATE_PLAIN", "{author_sort}/{title}"),

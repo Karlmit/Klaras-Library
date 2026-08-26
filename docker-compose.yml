@@ -18,6 +18,13 @@ services:
       # false = the device talks only to this server. More private, but
       #         purchased Kobo books stop appearing.
       - KLARAS_KOBO_PROXY_STORE=true
+      # Optional. Fills in missing book descriptions from Google Books, up to
+      # 1,000 a day, continuing each night until the library is done. Free from
+      # https://console.cloud.google.com/apis/credentials -- restrict it to the
+      # Books API. Without a key the books' own files are still read, which
+      # covers roughly one book in eleven.
+      # - KLARAS_GOOGLE_BOOKS_KEY=
+      # - KLARAS_DESCRIPTIONS_PER_DAY=900
     volumes:
       # Your ebook library. Klaras owns this tree and moves files within it, so
       # point it at the library itself, not a parent folder.
