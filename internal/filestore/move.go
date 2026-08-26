@@ -250,24 +250,58 @@ func (s *Store) Apply(ctx context.Context, p *Plan) error {
 // uniqueDir appends a disambiguating suffix if another book already owns the
 // target directory.
 func (s *Store) uniqueDir(ctx context.Context, dir string, bookID int64) (string, string, error) {
-	abs, err := s.Abs(dir)
+	resolved, err := s.resolveDir(ctx, dir, bookID, nil)
 	if err != nil {
 		return "", "", err
 	}
-	var owner int64
-	err = s.pool.QueryRow(ctx, `SELECT id FROM books WHERE path=$1 AND id<>$2`, dir, bookID).
-		Scan(&owner)
-	free := errors.Is(err, pgx.ErrNoRows)
-	if err != nil && !free {
-		return "", "", err
+	abs, err := s.Abs(resolved)
+	return resolved, abs, err
+}
+
+// resolveDir decides the directory a book will actually be filed in.
+//
+// Two different books can render to the same path -- the same title by the same
+// author, which this library has several hundred of -- and merging them into
+// one folder would put two books' files side by side under names that collide.
+//
+// claimed lets a caller resolve a whole run's worth of moves without performing
+// them, by recording what earlier books in the same run have taken. Passing nil
+// consults only the database, which is correct when moves are being applied for
+// real: each one commits its new path before the next is planned. PreviewDir
+// passes a map so that a dry run reports the same directories the real run will
+// choose -- otherwise the plan an operator reviews is not the plan that runs.
+func (s *Store) resolveDir(ctx context.Context, dir string, bookID int64, claimed map[string]int64) (string, error) {
+	taken := false
+	if owner, ok := claimed[dir]; ok && owner != bookID {
+		taken = true
 	}
-	if free {
-		return dir, abs, nil
+	if !taken {
+		var owner int64
+		err := s.pool.QueryRow(ctx, `SELECT id FROM books WHERE path=$1 AND id<>$2`, dir, bookID).
+			Scan(&owner)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return "", err
+		default:
+			taken = true
+		}
 	}
-	// The id is stable and unique, which is exactly what Calibre uses too.
-	dir = fmt.Sprintf("%s (%d)", dir, bookID)
-	abs, err = s.Abs(dir)
-	return dir, abs, err
+	if taken {
+		// The id is stable and unique, which is exactly what Calibre uses too.
+		dir = fmt.Sprintf("%s (%d)", dir, bookID)
+	}
+	if claimed != nil {
+		claimed[dir] = bookID
+	}
+	return dir, nil
+}
+
+// PreviewDir resolves where a book would be filed, without moving anything.
+//
+// claimed carries state across a run and is mutated; start with an empty map.
+func (s *Store) PreviewDir(ctx context.Context, dir string, bookID int64, claimed map[string]int64) (string, error) {
+	return s.resolveDir(ctx, dir, bookID, claimed)
 }
 
 // journalledMove records intent, performs the move, and marks it staged.

@@ -56,6 +56,10 @@ func (s *Store) Reorganize(ctx context.Context, dryRun bool, out io.Writer, log 
 		defer w.Flush()
 	}
 
+	// A dry run has to resolve collisions the same way the real run will, or
+	// the plan under review is not the plan that executes.
+	claimed := map[string]int64{}
+
 	for _, id := range ids {
 		if ctx.Err() != nil {
 			return rep, ctx.Err()
@@ -73,6 +77,16 @@ func (s *Store) Reorganize(ctx context.Context, dryRun bool, out io.Writer, log 
 			continue
 		}
 		rep.Planned++
+
+		if dryRun {
+			resolved, err := s.PreviewDir(ctx, plan.ToDir, id, claimed)
+			if err != nil {
+				log.Warn("could not resolve destination", "book", id, "err", err)
+				rep.Failed++
+				continue
+			}
+			plan.ToDir = resolved
+		}
 
 		if w != nil {
 			fmt.Fprintf(w, "book %d\n  from %s\n    to %s\n", id, plan.FromDir, plan.ToDir)

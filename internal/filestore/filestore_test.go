@@ -1,11 +1,14 @@
 package filestore_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -558,4 +561,95 @@ func TestDeleteIsJournalled(t *testing.T) {
 	if op != "delete" || state != "done" {
 		t.Errorf("journal shows op=%q state=%q, want delete/done", op, state)
 	}
+}
+
+// TestDryRunPlansTheSameDirectoriesItWillUse is the guard for a review artefact
+// that lied.
+//
+// Two books with the same title and author render to one directory, and Apply
+// disambiguates with a " (id)" suffix at move time. The dry run did not: it
+// printed the unresolved target, so a plan covering this library showed 327
+// pairs of books being merged into single folders with colliding filenames.
+// Nothing would actually have been lost, but a plan an operator cannot trust is
+// worse than no plan -- the whole point is to review what will happen.
+func TestDryRunPlansTheSameDirectoriesItWillUse(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+
+	// A second book, same title and author, in its own Calibre-style folder.
+	second := filepath.Join(f.root, "Old Author", "Old Title Duplicate")
+	if err := os.MkdirAll(second, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(second, "book.epub"), []byte("the other copy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var id2 int64
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO books (uuid, title, author_sort, path)
+		VALUES (gen_random_uuid(), 'Röda Rummet', 'Strindberg, August', 'Old Author/Old Title Duplicate')
+		RETURNING id`).Scan(&id2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO book_files (book_id, format, filename, size_bytes)
+		VALUES ($1,'EPUB','book.epub',14)`, id2); err != nil {
+		t.Fatal(err)
+	}
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	var planned bytes.Buffer
+	if _, err := f.st.Reorganize(ctx, true, &planned, log); err != nil {
+		t.Fatal(err)
+	}
+	dirsPlanned := destinations(planned.String())
+	if len(dirsPlanned) != 2 {
+		t.Fatalf("planned %d destinations, want 2: %v", len(dirsPlanned), dirsPlanned)
+	}
+	if dirsPlanned[0] == dirsPlanned[1] {
+		t.Fatalf("dry run put both books in %q; Apply would not", dirsPlanned[0])
+	}
+
+	// Now do it for real and compare with what was promised.
+	if _, err := f.st.Reorganize(ctx, false, io.Discard, log); err != nil {
+		t.Fatal(err)
+	}
+	var actual []string
+	rows, err := f.pool.Query(ctx, `SELECT path FROM books ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			t.Fatal(err)
+		}
+		actual = append(actual, p)
+	}
+	for i := range actual {
+		if actual[i] != dirsPlanned[i] {
+			t.Errorf("book %d: dry run said %q, the move used %q",
+				i, dirsPlanned[i], actual[i])
+		}
+	}
+
+	// And both books' files survived, which is what the folders were for.
+	for _, dir := range actual {
+		if _, err := os.Stat(filepath.Join(f.root, dir, "Röda Rummet - Strindberg, August.epub")); err != nil {
+			t.Errorf("no epub in %s: %v", dir, err)
+		}
+	}
+}
+
+// destinations pulls the "to" lines out of a reorganize plan.
+func destinations(plan string) []string {
+	var out []string
+	for _, line := range strings.Split(plan, "\n") {
+		if rest, ok := strings.CutPrefix(line, "    to "); ok {
+			out = append(out, rest)
+		}
+	}
+	return out
 }
