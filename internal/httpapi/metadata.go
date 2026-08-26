@@ -49,11 +49,29 @@ func (s *Server) handleMetadataSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := s.providers.Search(r.Context(), query, queryInt(r, "limit", 10))
+	// Both providers run together unless one is named. Narrowing cannot surface
+	// anything the default misses -- it is for reading one source on its own.
+	set := s.providers
+	if name := strings.TrimSpace(q.Get("provider")); name != "" && !strings.EqualFold(name, "all") {
+		set = set.Only(name)
+		if len(set.Names()) == 0 {
+			writeErr(w, http.StatusBadRequest, "no provider by that name")
+			return
+		}
+	}
+
+	results, sources := set.SearchWithStatus(r.Context(), query, queryInt(r, "limit", 10))
 	writeJSON(w, http.StatusOK, map[string]any{
+		// Echo the query back: the panel prefills these from the book, and
+		// someone retrying a failed lookup needs to see what was actually asked
+		// before they can change it.
 		"query":     map[string]string{"title": query.Title, "author": query.Author, "isbn": query.ISBN},
 		"providers": s.providers.Names(),
-		"results":   results,
+		"searched":  set.Names(),
+		// What each source did. Without it, a provider that is out of quota is
+		// indistinguishable from one that has never heard of the book.
+		"sources": sources,
+		"results": results,
 	})
 }
 

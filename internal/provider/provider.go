@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -80,21 +82,42 @@ func NewSetWithKey(lang, googleKey string) *Set {
 	}}
 }
 
+// ProviderStatus is what one provider did on a search: how many candidates it
+// contributed, or why it contributed none.
+//
+// A provider that fails is skipped rather than failing the whole lookup, which
+// is right -- one slow source should not cost someone the other's results. But
+// skipped silently, "Google Books is out of quota today" and "Google Books has
+// never heard of this book" look identical, and the second sends someone
+// editing metadata by hand for no reason.
+type ProviderStatus struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+	Error string `json:"error,omitempty"`
+}
+
 // Search queries every provider and returns the combined candidates, best
 // first. A provider that fails is skipped rather than failing the whole lookup.
 func (s *Set) Search(ctx context.Context, q Query, limit int) []Result {
+	res, _ := s.SearchWithStatus(ctx, q, limit)
+	return res
+}
+
+// SearchWithStatus is Search, with an account of what each provider did.
+func (s *Set) SearchWithStatus(ctx context.Context, q Query, limit int) ([]Result, []ProviderStatus) {
 	if limit <= 0 {
 		limit = 10
 	}
 	type out struct {
-		res []Result
-		err error
+		name string
+		res  []Result
+		err  error
 	}
 	ch := make(chan out, len(s.providers))
 	for _, p := range s.providers {
 		go func(p Provider) {
 			r, err := p.Search(ctx, q, limit)
-			ch <- out{r, err}
+			ch <- out{p.Name(), r, err}
 		}(p)
 	}
 
@@ -103,20 +126,53 @@ func (s *Set) Search(ctx context.Context, q Query, limit int) []Result {
 	// then has to remember to guard. One did not, and a lookup that found
 	// nothing took the whole page down with it.
 	all := []Result{}
+	status := make([]ProviderStatus, 0, len(s.providers))
 	for range s.providers {
 		o := <-ch
+		st := ProviderStatus{Name: o.name, Count: len(o.res)}
+		switch {
+		case errors.Is(o.err, ErrQuota):
+			st.Error = "daily quota reached"
+		case errors.Is(o.err, ErrUnavailable):
+			st.Error = "not answering just now"
+		case o.err != nil:
+			st.Error = "search failed"
+		}
+		status = append(status, st)
 		if o.err != nil {
 			continue
 		}
 		all = append(all, o.res...)
 	}
+	sort.Slice(status, func(i, j int) bool { return status[i].Name < status[j].Name })
 
 	scoreAll(all, q)
 	sortByScore(all)
 	if len(all) > limit {
 		all = all[:limit]
 	}
-	return all
+	return all, status
+}
+
+// Only narrows the set to one provider by name.
+//
+// Both providers are queried together by default and their results merged, so
+// this cannot find anything the default search would miss. It is for looking
+// at one source on its own: when a result is wrong it is useful to know which
+// of them said it, and Open Library's series data and Google's blurbs are
+// worth comparing side by side.
+//
+// An unknown name returns an empty set rather than silently falling back to
+// everything, so a typo shows up as no results instead of as a search that
+// quietly ignored the request.
+func (s *Set) Only(name string) *Set {
+	out := &Set{}
+	for _, p := range s.providers {
+		if strings.EqualFold(p.Name(), name) {
+			out.providers = append(out.providers, p)
+		}
+	}
+	return out
 }
 
 // Names lists the configured providers.

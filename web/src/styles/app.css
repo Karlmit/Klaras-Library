@@ -1135,3 +1135,58 @@ select.sort {
   justify-content: center;
   margin-top: 1.2rem;
 }
+
+/* Cover replacement: a file from this computer, or an address the server
+   fetches itself. */
+.coverswap {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+.coverswap__img {
+  width: 56px;
+  border-radius: 4px;
+  box-shadow: var(--shadow-cover);
+  flex: none;
+}
+.coverswap__ctl { min-width: 0; flex: 1; }
+.coverswap__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.coverswap__or { color: var(--text-muted); font-size: 0.8rem; }
+/* Matching .field input rather than inheriting nothing: these sit outside a
+   .field wrapper, and unstyled they came out 27px tall against the app's 36 --
+   visibly different, and a poor target on a phone. */
+.coverswap__url,
+.lookup__terms input,
+.lookup__terms select {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  min-width: 0;
+}
+.coverswap__url:focus,
+.lookup__terms input:focus,
+.lookup__terms select:focus { border-color: var(--accent); }
+.coverswap__url { flex: 1; }
+.coverswap__hint { margin: 2px 0 0; font-size: 0.75rem; }
+
+/* Search terms for a metadata lookup, editable because the book's own title is
+   often what is stopping it matching. */
+.lookup__terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.lookup__terms input { flex: 1 1 8rem; min-width: 0; }
+.lookup__terms .lookup__isbn { flex: 0 1 8rem; }
+.lookup__terms select { flex: 0 1 11rem; }

@@ -194,7 +194,7 @@ function BookCard({
           {isSelected ? '✓' : ''}
         </button>
         <img
-          src={coverUrl(book.id, 'grid')}
+          src={coverUrl(book.id, 'grid', book.cover_v)}
           alt=""
           loading="lazy"
           decoding="async"

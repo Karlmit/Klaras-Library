@@ -21,10 +21,15 @@ type BookListItem struct {
 	SeriesIndex *float64 `json:"series_index,omitempty"`
 	Rating      *int16   `json:"rating,omitempty"`
 	HasCover    bool     `json:"has_cover"`
-	NeedsReview bool     `json:"needs_review"`
-	AdultReason string   `json:"adult_reason,omitempty"`
-	PubYear     *int     `json:"pub_year,omitempty"`
-	AddedAt     string   `json:"added_at"`
+	// CoverV changes when the book does, and rides along in the cover URL.
+	// Covers are cached hard on purpose, so without something in the URL that
+	// moves, a replaced cover keeps showing the old picture until the cache
+	// expires -- a day later, or whenever someone thinks to force a reload.
+	CoverV      int64  `json:"cover_v"`
+	NeedsReview bool   `json:"needs_review"`
+	AdultReason string `json:"adult_reason,omitempty"`
+	PubYear     *int   `json:"pub_year,omitempty"`
+	AddedAt     string `json:"added_at"`
 }
 
 // BookPage is one page of results.
@@ -279,7 +284,8 @@ func (s *Store) ListBooks(ctx context.Context, f Filter) (*BookPage, error) {
 
 	q := fmt.Sprintf(`
 		SELECT b.id, b.uuid, b.title, b.author_names, b.series_name, b.series_index,
-		       b.rating, b.has_cover, b.needs_review, COALESCE(b.adult_reason,''),
+		       b.rating, b.has_cover, EXTRACT(EPOCH FROM b.updated_at)::bigint,
+		       b.needs_review, COALESCE(b.adult_reason,''),
 		       EXTRACT(YEAR FROM b.pubdate)::int, b.added_at,
 		       b.%s::text
 		FROM books b
@@ -300,7 +306,7 @@ func (s *Store) ListBooks(ctx context.Context, f Filter) (*BookPage, error) {
 		var added time.Time
 		var key *string
 		if err := rows.Scan(&it.ID, &it.UUID, &it.Title, &it.Authors, &it.Series,
-			&it.SeriesIndex, &it.Rating, &it.HasCover, &it.NeedsReview, &it.AdultReason,
+			&it.SeriesIndex, &it.Rating, &it.HasCover, &it.CoverV, &it.NeedsReview, &it.AdultReason,
 			&it.PubYear, &added, &key); err != nil {
 			return nil, err
 		}

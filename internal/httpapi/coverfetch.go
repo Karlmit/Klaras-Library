@@ -13,48 +13,33 @@ import (
 	"github.com/Karlmit/Klaras-Library/internal/jobs"
 )
 
-// coverHosts are the only places a cover may be fetched from.
+// A cover may be fetched from anywhere on the public internet.
 //
 // This endpoint takes a URL and asks the server to open it, which is a
-// server-side request forgery waiting to happen: without a list, "cover_url"
-// could name the Docker network, the Unraid host, or a cloud metadata endpoint,
-// and the reply would be written into a book as a picture. The list is not a
-// convenience -- it is the whole security of the thing.
+// server-side request forgery waiting to happen: unchecked, "url" could name
+// the Docker network, the Unraid host, or a cloud metadata endpoint, and the
+// reply would be written into a book as a picture.
 //
-// These are the hosts the bundled providers actually return.
-var coverHosts = map[string]bool{
-	"books.google.com":            true,
-	"books.googleusercontent.com": true,
-	"covers.openlibrary.org":      true,
-	// Open Library's cover URLs are a 302 to the Internet Archive, which is
-	// where the file actually lives.
-	"archive.org": true,
-}
-
-// coverHostAllowed also accepts the Archive's numbered delivery nodes, where a
-// download redirect finally lands: ia800304.us.archive.org and the like.
-// Matching the suffix is the only workable option; there are hundreds and they
-// change.
-func coverHostAllowed(host string) bool {
-	return coverHosts[host] || strings.HasSuffix(host, ".archive.org")
-}
-
+// It used to be guarded by a list of provider hostnames. That list cannot
+// survive pasting a cover URL from an arbitrary shop or archive, which is the
+// point of the feature -- and it was never the right control anyway. What must
+// not happen is reaching something internal, and that is a property of the
+// address, not the name. safeDialer enforces it at connect time, on every
+// redirect hop, against the IP actually being dialled. See safedial.go.
+//
+// What remains here: only http and https, a bounded number of hops, a size
+// limit, and a decode -- the bytes have to be an image before they are kept.
 var coverFetchClient = &http.Client{
-	Timeout: 20 * time.Second,
-	// The allow-list has to hold on every hop, not only the first.
-	//
-	// Checking just the submitted URL is a well-worn way to be led somewhere
-	// else: a permitted host answers 302 naming an internal address, and the
-	// client follows it carrying the server's own network position. Open
-	// Library legitimately redirects twice, so refusing redirects outright is
-	// not an option either.
+	Timeout:   30 * time.Second,
+	Transport: &http.Transport{DialContext: safeDialer.DialContext},
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 8 {
 			return fmt.Errorf("too many redirects")
 		}
-		if !coverHostAllowed(req.URL.Hostname()) {
-			return fmt.Errorf("redirected to %s, which is not a known cover source",
-				req.URL.Hostname())
+		// The dialer covers where a hop goes; this covers how. Without it a
+		// redirect to file:// or another scheme leaves the guard behind.
+		if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+			return fmt.Errorf("refusing to follow a %s redirect", req.URL.Scheme)
 		}
 		return nil
 	},
@@ -76,12 +61,10 @@ func (s *Server) handleFetchCover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u, err := url.Parse(strings.TrimSpace(in.URL))
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || !coverHostAllowed(u.Hostname()) {
-		writeErr(w, http.StatusBadRequest, "that address is not a known cover source")
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		writeErr(w, http.StatusBadRequest, "that does not look like an image address")
 		return
 	}
-	// Providers hand out http links for images they serve over https too.
-	u.Scheme = "https"
 
 	info, err := s.lib.PathInfo(r.Context(), id)
 	if err != nil {
@@ -106,6 +89,14 @@ func (s *Server) handleFetchCover(w http.ResponseWriter, r *http.Request) {
 
 	res, err := coverFetchClient.Do(req)
 	if err != nil {
+		s.log.Warn("cover fetch failed", "book", id, "url", u.String(), "err", err)
+		// The dialer refuses internal addresses, and that refusal is worth
+		// naming: it is a rule, not a network problem to retry.
+		if strings.Contains(err.Error(), "is not a public address") {
+			writeErr(w, http.StatusBadRequest,
+				"that address is inside this network, so it will not be fetched")
+			return
+		}
 		writeErr(w, http.StatusBadGateway, "the cover could not be downloaded")
 		return
 	}

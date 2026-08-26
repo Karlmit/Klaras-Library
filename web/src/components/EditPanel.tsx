@@ -218,39 +218,82 @@ function CoverSwap({ bookId }: { bookId: number }) {
   const qc = useQueryClient()
   const [error, setError] = useState('')
   const [bust, setBust] = useState(0)
+  const [url, setUrl] = useState('')
+
+  // Both routes end the same way. The grid has to be invalidated too, or the
+  // card behind this panel keeps the old picture until something else refetches
+  // it -- which is how a replaced cover appeared not to have worked at all.
+  const replaced = () => {
+    setError('')
+    setBust(Date.now())
+    void qc.invalidateQueries({ queryKey: ['books'] })
+    void qc.invalidateQueries({ queryKey: ['book', bookId] })
+  }
 
   const swap = useMutation({
     mutationFn: (f: File) => booksApi.replaceCover(bookId, f),
+    onSuccess: replaced,
+    onError: (e) => setError((e as Error).message),
+  })
+
+  const fromUrl = useMutation({
+    mutationFn: (u: string) => booksApi.fetchCover(bookId, u),
     onSuccess: () => {
-      setError('')
-      // The URL is unchanged, so the browser would keep the old image; a
-      // cache-busting parameter is the cheapest way to show the new one.
-      setBust(Date.now())
-      void qc.invalidateQueries({ queryKey: ['books'] })
+      setUrl('')
+      replaced()
     },
     onError: (e) => setError((e as Error).message),
   })
 
+  const busy = swap.isPending || fromUrl.isPending
+
   return (
-    <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 14 }}>
+    <div className="coverswap">
       <img
         src={`${coverUrl(bookId, 'grid')}${bust ? `?v=${bust}` : ''}`}
         alt=""
-        style={{ width: 56, borderRadius: 4, boxShadow: 'var(--shadow-cover)' }}
+        className="coverswap__img"
       />
-      <div>
-        <label className="btn btn--ghost btn--sm" style={{ cursor: 'pointer' }}>
-          {swap.isPending ? 'Uploading…' : 'Replace cover'}
+      <div className="coverswap__ctl">
+        <div className="coverswap__row">
+          <label className="btn btn--ghost btn--sm" style={{ cursor: busy ? 'default' : 'pointer' }}>
+            {swap.isPending ? 'Uploading…' : 'Upload a file'}
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              disabled={busy}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) swap.mutate(f)
+              }}
+            />
+          </label>
+          <span className="coverswap__or">or</span>
+        </div>
+        <form
+          className="coverswap__row"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const u = url.trim()
+            if (u) fromUrl.mutate(u)
+          }}
+        >
           <input
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) swap.mutate(f)
-            }}
+            type="url"
+            className="coverswap__url"
+            placeholder="paste an image address"
+            value={url}
+            disabled={busy}
+            onChange={(e) => setUrl(e.target.value)}
           />
-        </label>
+          <button className="btn btn--sm" disabled={busy || !url.trim()}>
+            {fromUrl.isPending ? 'Fetching…' : 'Fetch'}
+          </button>
+        </form>
+        <p className="hint coverswap__hint">
+          The server downloads it, so the picture never has to reach your computer first.
+        </p>
         {error && <div className="warn" style={{ marginTop: 4 }}>{error}</div>}
       </div>
     </div>
@@ -273,21 +316,82 @@ function Lookup({
   bookId: number
   onApply: (r: MetadataResult) => void
 }) {
+  // What was actually searched for, so it can be changed. The first search runs
+  // on what the book already holds; when that finds nothing -- and for a Swedish
+  // title carrying a subtitle, it often does -- the fix is almost always a
+  // shorter title, not a different provider.
+  const [terms, setTerms] = useState<{ title: string; author: string; isbn: string } | null>(null)
+  const [provider, setProvider] = useState('')
+  const [run, setRun] = useState(0)
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ['lookup', bookId],
-    queryFn: () => editApi.lookup(bookId),
+    queryKey: ['lookup', bookId, run],
+    queryFn: () => editApi.lookup(bookId, { ...(terms ?? {}), provider: provider || undefined }),
     staleTime: 5 * 60_000,
   })
 
-  if (isLoading) return <p style={{ color: 'var(--text-muted)' }}>Searching…</p>
-  if (error) return <div className="error">{(error as Error).message}</div>
-  // ?. on data alone is not enough: results itself can be absent, and reading
-  // .length off it is what turned "no matches" into a blank page.
+  // Prefilled from the book on the first reply, then left alone: retyping is the
+  // whole point, and overwriting what someone typed on every refetch defeats it.
+  useEffect(() => {
+    if (data?.query && terms === null) setTerms(data.query)
+  }, [data, terms])
+
   const results = data?.results ?? []
-  if (!results.length) return <p style={{ color: 'var(--text-muted)' }}>Nothing found.</p>
+  const search = (e: React.FormEvent) => {
+    e.preventDefault()
+    setRun((n) => n + 1)
+  }
 
   return (
     <div className="lookup">
+      <form className="lookup__terms" onSubmit={search}>
+        <input
+          value={terms?.title ?? ''}
+          placeholder="title"
+          onChange={(e) => setTerms((t) => ({ ...(t ?? { title: '', author: '', isbn: '' }), title: e.target.value }))}
+        />
+        <input
+          value={terms?.author ?? ''}
+          placeholder="author"
+          onChange={(e) => setTerms((t) => ({ ...(t ?? { title: '', author: '', isbn: '' }), author: e.target.value }))}
+        />
+        <input
+          value={terms?.isbn ?? ''}
+          placeholder="ISBN"
+          className="lookup__isbn"
+          onChange={(e) => setTerms((t) => ({ ...(t ?? { title: '', author: '', isbn: '' }), isbn: e.target.value }))}
+        />
+        <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+          <option value="">Both sources</option>
+          {(data?.providers ?? []).map((n) => (
+            <option key={n} value={n}>
+              {n} only
+            </option>
+          ))}
+        </select>
+        <button className="btn btn--sm" disabled={isLoading}>
+          {isLoading ? 'Searching…' : 'Search'}
+        </button>
+      </form>
+
+      {isLoading && <p style={{ color: 'var(--text-muted)' }}>Searching…</p>}
+      {!!error && <div className="error">{(error as Error).message}</div>}
+      {/* A source that failed is not a source that found nothing, and the
+          difference decides whether retrying is worth anything. */}
+      {(data?.sources ?? [])
+        .filter((s) => s.error)
+        .map((s) => (
+          <div key={s.name} className="warn" style={{ marginBottom: 8 }}>
+            {s.name}: {s.error}
+          </div>
+        ))}
+
+      {!isLoading && !error && !results.length && (
+        <p style={{ color: 'var(--text-muted)' }}>
+          Nothing found. A shorter title usually helps — try dropping the subtitle.
+        </p>
+      )}
+
       {results.slice(0, 6).map((r, i) => (
         <button key={i} className="lookup__item" onClick={() => onApply(r)}>
           {r.cover_url && <img src={r.cover_url} alt="" loading="lazy" />}

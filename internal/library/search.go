@@ -40,7 +40,8 @@ func (s *Store) searchBooks(ctx context.Context, f Filter) (*BookPage, error) {
 		WITH q AS (SELECT plainto_tsquery('%[1]s', f_unaccent($1)) AS ts,
 		                  f_unaccent($1)                          AS raw)
 		SELECT b.id, b.uuid, b.title, b.author_names, b.series_name, b.series_index,
-		       b.rating, b.has_cover, b.needs_review,
+		       b.rating, b.has_cover, EXTRACT(EPOCH FROM b.updated_at)::bigint,
+		       b.needs_review,
 		       EXTRACT(YEAR FROM b.pubdate)::int, b.added_at,
 		       GREATEST(
 		         ts_rank(b.search_tsv, q.ts) * 4,
@@ -67,7 +68,7 @@ func (s *Store) searchBooks(ctx context.Context, f Filter) (*BookPage, error) {
 		var added time.Time
 		var score float32
 		if err := rows.Scan(&it.ID, &it.UUID, &it.Title, &it.Authors, &it.Series,
-			&it.SeriesIndex, &it.Rating, &it.HasCover, &it.NeedsReview,
+			&it.SeriesIndex, &it.Rating, &it.HasCover, &it.CoverV, &it.NeedsReview,
 			&it.PubYear, &added, &score); err != nil {
 			return nil, err
 		}

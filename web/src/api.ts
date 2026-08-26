@@ -12,6 +12,8 @@ export interface BookListItem {
   series_index?: number
   rating?: number
   has_cover: boolean
+  /** Moves when the book does, so a replaced cover is fetched rather than cached. */
+  cover_v?: number
   needs_review: boolean
   adult_reason?: string
   pub_year?: number
@@ -169,8 +171,11 @@ export const api = {
     ),
 }
 
-export const coverUrl = (id: number, size: 'grid' | 'detail' = 'grid') =>
-  `/api/books/${id}/cover/${size}`
+// v is a version token, not a cache-buster bolted on after the fact: covers are
+// served with a long max-age, so the URL has to change when the picture does or
+// the browser has no reason to ask again.
+export const coverUrl = (id: number, size: 'grid' | 'detail' = 'grid', v?: number | string) =>
+  `/api/books/${id}/cover/${size}${v ? `?v=${encodeURIComponent(String(v))}` : ''}`
 
 export interface Shelf {
   id: number
@@ -248,10 +253,37 @@ export const editApi = {
       body: JSON.stringify({ ids, edit, add_tags, remove_tags }),
     }),
 
-  lookup: (bookId: number) =>
-    req<{ results: MetadataResult[]; providers: string[] }>(
-      `/api/metadata/search?book=${bookId}`,
-    ),
+  lookup: (bookId: number, opts?: LookupOpts) => {
+    const p = new URLSearchParams({ book: String(bookId) })
+    if (opts?.title) p.set('title', opts.title)
+    if (opts?.author) p.set('author', opts.author)
+    if (opts?.isbn) p.set('isbn', opts.isbn)
+    if (opts?.provider) p.set('provider', opts.provider)
+    return req<LookupResponse>(`/api/metadata/search?${p}`)
+  },
+}
+
+export interface LookupOpts {
+  title?: string
+  author?: string
+  isbn?: string
+  /** A provider name, or absent for all of them. */
+  provider?: string
+}
+
+export interface ProviderStatus {
+  name: string
+  count: number
+  /** Present when the source failed rather than simply finding nothing. */
+  error?: string
+}
+
+export interface LookupResponse {
+  results: MetadataResult[]
+  providers: string[]
+  searched: string[]
+  sources: ProviderStatus[]
+  query: { title: string; author: string; isbn: string }
 }
 
 export interface DiscoverCard {
