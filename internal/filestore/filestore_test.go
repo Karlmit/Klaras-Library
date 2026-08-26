@@ -819,3 +819,52 @@ func TestRelinkFindsAFileRenamedOutFromUnderTheDatabase(t *testing.T) {
 		t.Errorf("still missing after relink: %+v", after)
 	}
 }
+
+// TestSlashInMetadataDoesNotCreateDirectories guards the template's shape.
+//
+// Dir splits the rendered template on "/" to find its components, so a slash in
+// an author or title used to become a directory separator: "Agnes Wold /
+// Cecilia Chrapkowska" filed a book two levels deep under a two-level template,
+// and "Sveriges statsministrar under 100 år / Samlingsvolym" split the title in
+// half. About seventy books in the real library. FileBase never showed it,
+// because it sanitises the whole assembled string rather than its parts.
+func TestSlashInMetadataDoesNotCreateDirectories(t *testing.T) {
+	tpl := filestore.DefaultTemplate()
+
+	cases := []struct {
+		name  string
+		meta  filestore.Meta
+		depth int
+	}{
+		{"slash in author", filestore.Meta{
+			ID: 1, Title: "Praktika för blivande föräldrar",
+			AuthorSort: "Wold, Agnes/Chrapkowska, Cecilia"}, 2},
+		{"slash in title", filestore.Meta{
+			ID: 2, Title: "Sveriges statsministrar under 100 år / Samlingsvolym",
+			AuthorSort: "Ohlsson, Per T"}, 2},
+		{"backslash in author", filestore.Meta{
+			ID: 3, Title: "Skolans kriser",
+			AuthorSort: `Westberg, Joakim Landahl\David Sjögren`}, 2},
+		{"slash in series", filestore.Meta{
+			ID: 4, Title: "Kebab varje dag", AuthorSort: "Samuelsson, Åke",
+			Series: "Munken / Kulan", SeriesIndex: ptrf(2)}, 3},
+	}
+
+	for _, c := range cases {
+		dir := tpl.Dir(c.meta)
+		if got := strings.Count(dir, string(filepath.Separator)) + 1; got != c.depth {
+			t.Errorf("%s: Dir = %q, %d components, want %d",
+				c.name, dir, got, c.depth)
+		}
+		for _, part := range strings.Split(dir, string(filepath.Separator)) {
+			if part == "" || part == "." || part == ".." {
+				t.Errorf("%s: Dir = %q has an empty or traversing component", c.name, dir)
+			}
+		}
+		if !filestore.IsSafeRelative(dir) {
+			t.Errorf("%s: Dir = %q is not a safe relative path", c.name, dir)
+		}
+	}
+}
+
+func ptrf(v float64) *float64 { return &v }

@@ -132,19 +132,34 @@ func (t Template) FileBase(m Meta) string {
 	return SanitiseComponent(t.expand(t.File, m))
 }
 
+// sanitiseValue strips characters that would change a path's shape, without the
+// per-component rules (truncation, reserved names) that only make sense once
+// the template has been assembled.
+//
+// Applied to values before substitution, never after. Dir splits the rendered
+// template on "/" to find its components, so a slash inside an author or title
+// -- "Agnes Wold / Cecilia Chrapkowska", "Sveriges statsministrar under 100 år
+// / Samlingsvolym" -- became a directory separator and buried the book a level
+// deeper than the template says. Roughly 70 books in this library. FileBase
+// never showed it, because it sanitises the whole assembled string.
+func sanitiseValue(s string) string {
+	s = illegal.ReplaceAllString(s, " ")
+	return strings.TrimSpace(collapseSpace.ReplaceAllString(s, " "))
+}
+
 func (t Template) expand(tpl string, m Meta) string {
-	author := strings.TrimSpace(m.AuthorSort)
+	author := sanitiseValue(m.AuthorSort)
 	if author == "" {
 		author = "Unknown"
 	}
-	title := strings.TrimSpace(m.Title)
+	title := sanitiseValue(m.Title)
 	if title == "" {
 		title = "Unknown"
 	}
 	r := strings.NewReplacer(
 		"{author_sort}", author,
 		"{title}", title,
-		"{series}", strings.TrimSpace(m.Series),
+		"{series}", sanitiseValue(m.Series),
 		"{series_index}", formatSeriesIndex(m.SeriesIndex),
 		"{year}", yearOrEmpty(m.Year),
 		"{id}", strconv.FormatInt(m.ID, 10),
