@@ -134,7 +134,7 @@ export function BookDetail({ bookId, onClose, onFilter, onEdit, onRead, canEdit 
                     style={{ marginRight: 6, marginBottom: 6 }}
                     onClick={() => setShelfOpen((v) => !v)}
                   >
-                    {shelfOpen ? 'Cancel' : 'Add to shelf'}
+                    {shelfOpen ? 'Done' : 'Shelves'}
                   </button>
                   {book.files.map((f) => (
                     <a
@@ -151,7 +151,7 @@ export function BookDetail({ bookId, onClose, onFilter, onEdit, onRead, canEdit 
             </div>
 
             {shelfOpen && (
-              <AddToShelf bookId={book.id} onDone={() => setShelfOpen(false)} />
+              <AddToShelf bookId={book.id} on={book.shelves} onDone={() => setShelfOpen(false)} />
             )}
 
             {canEdit && (

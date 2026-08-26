@@ -8,6 +8,10 @@ interface Props {
   /** True on the administrators' adult-content screen, which needs its own
    *  actions: restore a book caught by mistake, and delete the rest. */
   reviewingAdult?: boolean
+  /** Set when the grid is filtered to one shelf, which makes "take these off
+   *  the shelf" a sensible thing to offer — and is the only practical way to
+   *  prune a shelf that Random book has filled. */
+  shelf?: { id: number; name: string } | null
 }
 
 /**
@@ -17,7 +21,7 @@ interface Props {
  * gap for a library this size: 1,115 books here carry a merged author name and
  * fixing those one at a time is not realistic.
  */
-export function BulkBar({ selected, onClear, reviewingAdult = false }: Props) {
+export function BulkBar({ selected, onClear, reviewingAdult = false, shelf = null }: Props) {
   const qc = useQueryClient()
   const ids = [...selected]
   const [panel, setPanel] = useState<'none' | 'tags' | 'author' | 'shelf' | 'language'>('none')
@@ -43,6 +47,12 @@ export function BulkBar({ selected, onClear, reviewingAdult = false }: Props) {
 
   const del = useMutation({
     mutationFn: (keepFiles: boolean) => deleteApi.bulk(ids, keepFiles),
+    onSuccess: done,
+    onError: (e) => setError((e as Error).message),
+  })
+
+  const offShelf = useMutation({
+    mutationFn: () => shelvesApi.setBooks(shelf!.id, [], ids),
     onSuccess: done,
     onError: (e) => setError((e as Error).message),
   })
@@ -78,6 +88,16 @@ export function BulkBar({ selected, onClear, reviewingAdult = false }: Props) {
           <button className="btn btn--sm btn--ghost" onClick={() => setPanel('shelf')}>
             Add to shelf
           </button>
+          {shelf && (
+            <button
+              className="btn btn--sm btn--ghost"
+              disabled={offShelf.isPending}
+              onClick={() => offShelf.mutate()}
+              title={`Take the selected books off ${shelf.name}. The books themselves are kept.`}
+            >
+              {offShelf.isPending ? 'Removing…' : `Remove from “${shelf.name}”`}
+            </button>
+          )}
           <button className="btn btn--sm btn--ghost" onClick={() => setPanel('language')}>
             Set language
           </button>

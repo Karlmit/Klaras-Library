@@ -430,6 +430,17 @@ Everything an operator needs day to day is also in the browser, under
 account on the Users tab, to reset someone else's device. Reach for the CLI when
 the browser is not an option, not as the normal path.
 
+### Shelves
+
+A book's **Shelves** button lists your own shelves with a tick beside the ones
+it is on; the row is a toggle, so the same control puts a book on a shelf and
+takes it off. Removing is also a bulk action: open a shelf from the sidebar,
+select books, and **Remove from "…"** appears in the bulk bar. That is the
+practical way to prune a shelf Random book has filled.
+
+Taking a book off a Kobo-synced shelf writes a tombstone, so the device drops it
+on the next sync rather than keeping it for ever.
+
 ### Random book
 
 A discovery screen: one cover at a time, kept or passed with a swipe, the arrow

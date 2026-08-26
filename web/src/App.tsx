@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, selectionApi, type BookQuery, type User } from './api'
+import { api, selectionApi, shelvesApi, type BookQuery, type User } from './api'
 import { AuthScreen, ForcePasswordChange } from './components/Auth'
 import { BulkBar } from './components/BulkBar'
 import { EditPanel } from './components/EditPanel'
@@ -156,6 +156,16 @@ export function App() {
     setPicked(new Set())
     setLastPicked(null)
   }, [])
+
+  // The shelf currently being viewed, if any. Only a shelf the reader owns
+  // counts: the bulk bar offers removal, and that is not theirs to do on
+  // someone else's public shelf.
+  const { data: shelfList } = useQuery({ queryKey: ['shelves'], queryFn: shelvesApi.list })
+  const activeShelf = useMemo(() => {
+    if (!query.shelf) return null
+    const s = shelfList?.shelves.find((x) => x.id === query.shelf && x.mine)
+    return s ? { id: s.id, name: s.name } : null
+  }, [query.shelf, shelfList])
 
   const activeChips = useMemo(() => {
     const chips: { key: keyof BookQuery; label: string; value: string }[] = []
@@ -331,7 +341,12 @@ export function App() {
           selected={picked}
           onToggleSelect={togglePick}
         />
-        <BulkBar selected={picked} onClear={clearPicked} reviewingAdult={query.adult === 'only'} />
+        <BulkBar
+          selected={picked}
+          onClear={clearPicked}
+          reviewingAdult={query.adult === 'only'}
+          shelf={activeShelf}
+        />
       </main>
 
       {selected != null && (

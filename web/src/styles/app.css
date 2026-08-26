@@ -962,3 +962,14 @@ select.sort {
     margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 17px;
 }
 .sheet > .disc, .sheet > * + * { min-height: 0; flex: 1; }
+
+/* A shelf row is a toggle, not a one-way action: the tick column is always
+   reserved so the rows do not shift as membership changes. */
+.shelfpick__item { display: flex; align-items: center; gap: 8px; }
+.shelfpick__tick {
+    flex: none; width: 15px; text-align: center;
+    color: var(--accent); font-weight: 600;
+}
+.shelfpick__item--on { background: var(--v-50); border-color: var(--v-200); }
+.shelfpick__item--on:hover { background: var(--v-100); }
+.shelfpick__done { align-self: flex-start; margin-top: 4px; }
