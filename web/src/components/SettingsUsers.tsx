@@ -70,7 +70,8 @@ export function SettingsUsers({ me }: { me: { id: number } }) {
         </div>
       )}
 
-      <table className="table">
+      <div className="table-wrap">
+        <table className="table">
         <thead>
           <tr>
             <th>User</th>
@@ -144,7 +145,8 @@ export function SettingsUsers({ me }: { me: { id: number } }) {
             </tr>
           ))}
         </tbody>
-      </table>
+        </table>
+      </div>
 
       {adding && (
         <NewUserDialog

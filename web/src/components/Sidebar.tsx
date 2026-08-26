@@ -5,6 +5,9 @@ interface Props {
   query: BookQuery
   onChange: (patch: Partial<BookQuery>) => void
   isAdmin: boolean
+  /** Drawer state. Only has an effect below the layout breakpoint, where the
+   *  sidebar is an overlay rather than a column. */
+  open?: boolean
 }
 
 /**
@@ -14,7 +17,7 @@ interface Props {
  * live they cost ~22ms each, and there are five of them, so a page load would
  * spend most of its budget counting things that barely change.
  */
-export function Sidebar({ query, onChange, isAdmin }: Props) {
+export function Sidebar({ query, onChange, isAdmin, open = false }: Props) {
   const { data } = useQuery({ queryKey: ['facets'], queryFn: api.facets, staleTime: 60_000 })
   const { data: shelves } = useQuery({ queryKey: ['shelves'], queryFn: shelvesApi.list })
 
@@ -35,7 +38,7 @@ export function Sidebar({ query, onChange, isAdmin }: Props) {
     !query.needs_review && !query.shelf && !query.adult
 
   return (
-    <nav className="sidebar" aria-label="Library filters">
+    <nav className={`sidebar ${open ? 'sidebar--open' : ''}`} aria-label="Library filters">
       <div className="navhead">Library</div>
       <button
         className={`navitem ${noFilter ? 'navitem--active' : ''}`}

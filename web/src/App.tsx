@@ -41,6 +41,8 @@ export function App() {
   const [searchInput, setSearchInput] = useState('')
 
   // Back closes whatever is open instead of leaving the site.
+  const [navOpen, setNavOpen] = useState(false)
+  const closeNav = useCallback(() => setNavOpen(false), [])
   const closeSettings = useCallback(() => setSettingsOpen(false), [])
   const closeDetail = useCallback(() => setSelected(null), [])
   const closeEdit = useCallback(() => setEditing(null), [])
@@ -51,6 +53,9 @@ export function App() {
   useOverlayHistory(editing != null, closeEdit)
   useOverlayHistory(reading != null, closeReader)
   useOverlayHistory(uploadOpen, closeUpload)
+  // The drawer is an overlay like any other, so Back closes it rather than
+  // leaving the site -- the first thing a thumb reaches for on a phone.
+  useOverlayHistory(navOpen, closeNav)
 
   const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ['status'],
@@ -190,6 +195,14 @@ export function App() {
   return (
     <div className="app">
       <div className="brand">
+        <button
+          className="brand__menu"
+          onClick={() => setNavOpen((v) => !v)}
+          aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
+          aria-expanded={navOpen}
+        >
+          <span aria-hidden="true">{navOpen ? '✕' : '☰'}</span>
+        </button>
         <BrandMark />
         <span className="brand__name">Klaras Library</span>
       </div>
@@ -235,7 +248,18 @@ export function App() {
         </div>
       </header>
 
-      <Sidebar query={query} onChange={patchQuery} isAdmin={user.role === 'admin'} />
+      {navOpen && <div className="scrim" onClick={closeNav} aria-hidden="true" />}
+      <Sidebar
+        query={query}
+        onChange={(patch) => {
+          patchQuery(patch)
+          // On a phone the drawer covers the grid, so leaving it open after a
+          // choice hides the result of that choice.
+          closeNav()
+        }}
+        isAdmin={user.role === 'admin'}
+        open={navOpen}
+      />
 
       <main className="main">
         <div className="toolbar">

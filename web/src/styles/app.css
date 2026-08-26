@@ -396,16 +396,6 @@ select.sort {
     clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
-@media (max-width: 820px) {
-    .app {
-        grid-template-columns: 1fr;
-        grid-template-areas: "brand" "top" "main";
-        grid-template-rows: var(--topbar-height) var(--topbar-height) 1fr;
-    }
-    .sidebar { display: none; }
-    .brand { border-right: 0; }
-}
-
 /* ---- selection & bulk actions -------------------------------------------*/
 .card__check {
     position: absolute;
@@ -668,3 +658,120 @@ select.sort {
 .pill--imported  { background: #DCFCE7; color: #14532D; }
 .pill--duplicate { background: var(--v-100); color: var(--v-800); }
 .pill--failed    { background: #FEE2E2; color: #991B1B; }
+
+/* Tables scroll sideways rather than being clipped.
+ *
+ * The users table needs 691px for its six columns. In a 360px viewport the
+ * parent clipped it at 360 with overflow-x: visible, so the right-hand columns
+ * -- which hold "N · resync" and "Set password" -- were not merely awkward to
+ * reach, they were off the screen with no way to get to them. */
+.table-wrap {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* ---- narrow screens ------------------------------------------------------
+ *
+ * The library is browsed on phones as much as on a desktop, and the previous
+ * rule here simply removed the sidebar below 820px -- which took away every
+ * filter, every shelf and the whole of navigation, leaving no way back to
+ * anything. It is now a drawer instead.
+ */
+
+/* Always available, so the drawer can be opened at any width; hidden on wide
+   screens where the sidebar is a permanent column. */
+.brand__menu {
+    display: none;
+    align-items: center; justify-content: center;
+    width: 40px; height: 40px;
+    margin-left: -8px;
+    border: 0; background: none; cursor: pointer;
+    border-radius: var(--radius-sm);
+    font-size: 18px; line-height: 1;
+    color: var(--text);
+}
+.brand__menu:hover { background: var(--v-50); }
+
+.scrim {
+    position: fixed; inset: 0;
+    background: rgb(0 0 0 / 0.4);
+    z-index: 30;
+}
+
+@media (max-width: 820px) {
+    .app {
+        grid-template-columns: 1fr;
+        grid-template-areas: "brand" "top" "main";
+        grid-template-rows: var(--topbar-height) var(--topbar-height) 1fr;
+    }
+    .brand { border-right: 0; }
+    .brand__menu { display: inline-flex; }
+
+    /* Off-canvas rather than display:none, so it animates and keeps its
+       scroll position. Not in the grid flow at this width. */
+    .sidebar {
+        position: fixed;
+        top: 0; bottom: 0; left: 0;
+        width: min(310px, 84vw);
+        z-index: 31;
+        transform: translateX(-100%);
+        transition: transform 180ms ease;
+        border-right: 1px solid var(--border);
+        box-shadow: 0 0 24px rgb(0 0 0 / 0.18);
+        padding-top: 16px;
+        overscroll-behavior: contain;
+    }
+    .sidebar--open { transform: translateX(0); }
+
+    .topbar { padding: 0 10px; gap: 8px; }
+    .usermenu__name { display: none; }
+
+    /* The toolbar carries a count, filter chips, two buttons and a select.
+       On a phone that is more than one line, and it used to push the sort
+       control off the right edge instead of wrapping. */
+    .toolbar { flex-wrap: wrap; padding: 8px 10px; row-gap: 8px; }
+    .toolbar .sort, .toolbar select { max-width: 46vw; }
+
+    .grid-scroll { padding: 10px; }
+    .grid { gap: 14px 10px; }
+
+    /* Bulk actions scroll sideways rather than wrapping into a wall of
+       buttons that covers the grid it is acting on. */
+    .bulkbar {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        scrollbar-width: none;
+    }
+    .bulkbar::-webkit-scrollbar { display: none; }
+    .bulkbar > * { flex: none; }
+}
+
+/* Denser grid on small screens.
+ *
+ * minmax(170px, 1fr) yields exactly one column on a 360px phone: 328px of
+ * content cannot fit two 170px tracks plus a gap. One cover per row turns
+ * browsing 28,000 books into an infinite scroll of individual covers, which is
+ * the opposite of what a cover grid is for. */
+@media (max-width: 700px) { :root { --grid-min-col: 128px; } }
+@media (max-width: 540px) { :root { --grid-min-col: 96px; } }
+
+/* Touch input: no hover, and fingers are not cursors.
+ *
+ * Everything interactive gets a 44px target -- the buttons here were 28px --
+ * and the selection checkbox stops hiding behind :hover, which on a touch
+ * screen never happens, so multi-select was unreachable. */
+
+/* Either condition, deliberately: a narrow window on a laptop should get the
+   same reachable controls, and a tablet with a wide screen still has fingers. */
+@media (max-width: 820px), (hover: none) {
+    .btn, .btn--sm { min-height: 44px; }
+    .btn--sm { padding: 0 12px; }
+    .navitem { min-height: 44px; }
+    .search input { height: 42px; }
+    .sort, select.sort { min-height: 40px; }
+    .card__check { opacity: 1; width: 28px; height: 28px; font-size: 15px; }
+    .tab { min-height: 44px; }
+    .drawer__close, .search__clear { min-width: 44px; min-height: 44px; }
+}

@@ -80,7 +80,8 @@ export function Shelves({ onBrowse }: { onBrowse: (shelfId: number) => void }) {
           <strong> Sync to Kobo</strong> to have its books appear on a device.
         </p>
       ) : (
-      <table className="table">
+      <div className="table-wrap">
+        <table className="table">
         <thead>
           <tr>
             <th>Shelf</th>
@@ -142,7 +143,8 @@ export function Shelves({ onBrowse }: { onBrowse: (shelfId: number) => void }) {
             </tr>
           ))}
         </tbody>
-      </table>
+        </table>
+      </div>
       )}
 
       {mine.some((s) => s.kobo_sync) && (
@@ -155,7 +157,8 @@ export function Shelves({ onBrowse }: { onBrowse: (shelfId: number) => void }) {
       {others.length > 0 && (
         <>
           <h3 style={{ marginTop: 26 }}>Shared with you</h3>
-          <table className="table">
+          <div className="table-wrap">
+            <table className="table">
             <thead>
               <tr>
                 <th>Shelf</th>
@@ -189,7 +192,8 @@ export function Shelves({ onBrowse }: { onBrowse: (shelfId: number) => void }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
           <p className="hint">
             Subscribing sends a shelf someone else owns to <em>your</em> devices. The
             owner's own Sync to Kobo setting only affects theirs.

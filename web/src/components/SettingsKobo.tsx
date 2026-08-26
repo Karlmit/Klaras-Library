@@ -106,7 +106,8 @@ export function SettingsKobo() {
       {isLoading ? (
         <p>Loading…</p>
       ) : data?.tokens.length ? (
-        <table className="table">
+        <div className="table-wrap">
+          <table className="table">
           <thead>
             <tr>
               <th>Device</th>
@@ -127,7 +128,8 @@ export function SettingsKobo() {
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       ) : (
         <p className="hint">No devices paired yet.</p>
       )}
