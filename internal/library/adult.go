@@ -137,6 +137,14 @@ func (s *Store) ScanAdult(ctx context.Context, dryRun bool, out io.Writer) (*Adu
 		return nil, fmt.Errorf("flag adult content: %w", err)
 	}
 	rep.Flagged = int(n)
+
+	// Rebuild the sidebar counts now rather than leaving them wrong for up to
+	// half a minute. The command has just told the operator what it did; the
+	// screen should agree by the time they look at it.
+	if _, err := s.RefreshFacets(ctx, true); err != nil {
+		return rep, fmt.Errorf("flagged %d books, but the sidebar counts could not be rebuilt: %w",
+			rep.Flagged, err)
+	}
 	return rep, nil
 }
 

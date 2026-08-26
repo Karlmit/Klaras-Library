@@ -162,3 +162,58 @@ func TestFlaggingDoesNotTouchUpdatedAt(t *testing.T) {
 		t.Errorf("updated_at moved from %s to %s; every Kobo would resync", before, after)
 	}
 }
+
+// TestFacetsNoticeHiddenBooks guards an interaction between two deliberate
+// decisions that cancelled each other out.
+//
+// Flagging must not touch updated_at, because that drives Kobo sync. The facet
+// refresher decided whether it had work by watching max(updated_at) and
+// count(*). Flagging 1,860 books therefore changed neither signal, the counts
+// were never rebuilt, and the sidebar went on reporting the old total while the
+// Adult content entry stayed hidden -- because its count was still zero. The
+// feature looked like it had not run.
+func TestFacetsNoticeHiddenBooks(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	if _, err := s.RefreshFacets(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.Facets(ctx, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids, _, err := s.BookIDs(ctx, library.Filter{}, 4)
+	if err != nil || len(ids) < 4 {
+		t.Fatalf("need 4 seeded books: %v", err)
+	}
+	if _, err := s.SetAdultMany(ctx, ids, true); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.SetAdultMany(context.Background(), ids, false)
+		_, _ = s.RefreshFacets(context.Background(), true)
+	})
+
+	// Not forced: this is exactly what the background refresher does.
+	did, err := s.RefreshFacets(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !did {
+		t.Fatal("the refresher saw no work to do after 4 books were hidden")
+	}
+
+	after, err := s.Facets(ctx, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.TotalBooks != before.TotalBooks-4 {
+		t.Errorf("total_books = %d, want %d", after.TotalBooks, before.TotalBooks-4)
+	}
+	if after.Adult != 4 {
+		t.Errorf("adult count = %d, want 4; the sidebar entry is hidden while this is zero",
+			after.Adult)
+	}
+}

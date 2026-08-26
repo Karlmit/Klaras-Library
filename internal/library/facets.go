@@ -102,16 +102,29 @@ func (s *Store) RefreshFacets(ctx context.Context, force bool) (bool, error) {
 		return false, err
 	}
 
-	// Both signals are needed: max(updated_at) catches edits, count(*) catches
-	// deletions, which lower the count without moving the watermark.
+	// Three signals, and all three are needed. max(updated_at) catches edits,
+	// count(*) catches deletions -- which lower the count without moving the
+	// watermark -- and the visible count catches a book being hidden or
+	// restored, which deliberately moves neither. Flagging must not touch
+	// updated_at, because that drives Kobo sync; leaving it out of this check
+	// meant the sidebar kept reporting the old totals and the Adult content
+	// entry never appeared, because its count was still zero.
 	var mark time.Time
-	var count int64
-	if err := s.pool.QueryRow(ctx,
-		`SELECT COALESCE(max(updated_at), 'epoch'::timestamptz), count(*) FROM books`).
-		Scan(&mark, &count); err != nil {
+	var count, visible int64
+	if err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(max(updated_at), 'epoch'::timestamptz),
+		       count(*), count(*) FILTER (WHERE NOT adult)
+		FROM books`).
+		Scan(&mark, &count, &visible); err != nil {
 		return false, err
 	}
-	if !force && mark.Equal(lastMark) && count == lastCount {
+	var lastVisible int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT n FROM facet_counts WHERE kind='_total' AND value='books'`).
+		Scan(&lastVisible); err != nil {
+		lastVisible = -1 // never built, or mid-rebuild: refresh rather than guess
+	}
+	if !force && mark.Equal(lastMark) && count == lastCount && visible == lastVisible {
 		return false, nil
 	}
 
