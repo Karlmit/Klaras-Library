@@ -78,10 +78,28 @@ func (s *Server) handleDownloadBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	name := filename
+	if strings.EqualFold(format, "KEPUB") {
+		name = kepubDownloadName(filename)
+	}
 	w.Header().Set("Content-Type", contentTypeFor(format))
 	w.Header().Set("Content-Disposition",
-		"attachment; filename*=UTF-8''"+url.PathEscape(filename))
-	http.ServeContent(w, r, filename, st.ModTime(), f)
+		"attachment; filename*=UTF-8''"+url.PathEscape(name))
+	http.ServeContent(w, r, name, st.ModTime(), f)
+}
+
+// kepubDownloadName gives a KEPUB the name a Kobo needs.
+//
+// Calibre stores these as "Title - Author.kepub" and that is how they sit in
+// the library, but a Kobo only treats a sideloaded file as a KEPUB when it ends
+// .kepub.epub -- named anything else it is either read as an ordinary EPUB or
+// not indexed at all. The file is unchanged; only what the browser calls it is.
+func kepubDownloadName(filename string) string {
+	base := strings.TrimSuffix(filename, filepath.Ext(filename))
+	if strings.EqualFold(filepath.Ext(base), ".kepub") {
+		base = strings.TrimSuffix(base, filepath.Ext(base))
+	}
+	return base + ".kepub.epub"
 }
 
 func contentTypeFor(format string) string {
@@ -161,7 +179,7 @@ func (s *Server) serveConvertedKepub(
 		return
 	}
 
-	name := strings.TrimSuffix(epub, filepath.Ext(epub)) + ".kepub.epub"
+	name := kepubDownloadName(epub)
 	w.Header().Set("Content-Type", contentTypeFor("KEPUB"))
 	w.Header().Set("Content-Disposition",
 		"attachment; filename*=UTF-8''"+url.PathEscape(name))
