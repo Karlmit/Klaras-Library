@@ -48,6 +48,7 @@ export function App() {
   const [lastPicked, setLastPicked] = useState<number | null>(null)
   const [count, setCount] = useState<number | undefined>()
   const [searchInput, setSearchInput] = useState('')
+  const [crumbName, setCrumbName] = useState('')
 
   // Every view is a place with an address, so Back and Forward are the
   // browser's own rather than an imitation of them, and a page can be
@@ -107,6 +108,7 @@ export function App() {
   const [navOpen, setNavOpen] = useState(false)
   const closeNav = useCallback(() => setNavOpen(false), [])
   useEffect(() => { setNavOpen(false) }, [path])
+  useEffect(() => { setCrumbName('') }, [authorId])
 
   const closeDetail = useCallback(() => goBack('/'), [])
   const closeEdit = useCallback(() => goBack('/'), [])
@@ -379,10 +381,14 @@ export function App() {
             <div className="crumbs">
               <button className="linkish" onClick={() => navigate('/authors')}>Authors</button>
               <span aria-hidden="true">›</span>
-              <span>this author</span>
+              {/* The name, not "this author": a breadcrumb that does not say
+                  where you are is just a back button with extra steps. */}
+              <span>{crumbName || '…'}</span>
             </div>
             <AuthorPage
               authorId={authorId}
+              onName={setCrumbName}
+              onOpenBook={(id) => navigate(`/books/${id}`)}
               onBooks={(name) => navigate(href('/', { author: name }))}
             />
           </Suspense>

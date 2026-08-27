@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { browseApi, portraitUrl } from '../api'
+import { useEffect, useState } from 'react'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api, browseApi, coverUrl, portraitUrl, type BookListItem } from '../api'
 
 /**
  * One author: their picture, and what to do about it.
@@ -14,9 +14,14 @@ import { browseApi, portraitUrl } from '../api'
 export function AuthorPage({
   authorId,
   onBooks,
+  onOpenBook,
+  onName,
 }: {
   authorId: number
   onBooks: (name: string) => void
+  onOpenBook: (id: number) => void
+  /** Reported upward so the breadcrumb can say the name rather than "this author". */
+  onName?: (name: string) => void
 }) {
   const qc = useQueryClient()
   const { data: author, isLoading } = useQuery({
@@ -54,6 +59,10 @@ export function AuthorPage({
   })
 
   const busy = up.isPending || fromUrl.isPending || lookUp.isPending || clear.isPending
+
+  useEffect(() => {
+    if (author?.name) onName?.(author.name)
+  }, [author?.name, onName])
 
   if (isLoading || !author) return <p className="browse__empty">Loading…</p>
 
@@ -134,6 +143,78 @@ export function AuthorPage({
           </form>
         </div>
       </div>
+
+      <AuthorBooks name={author.name} onOpenBook={onOpenBook} onBooks={onBooks} />
     </div>
+  )
+}
+
+/**
+ * This author's books, listed on their page.
+ *
+ * Not the virtualised grid: that owns its own scroller, and nesting one inside
+ * a page that already scrolls gives two scrollbars and a header that will not
+ * move. An author has at most a few dozen books here, so a plain grid that
+ * scrolls with the page is both simpler and better behaved.
+ */
+function AuthorBooks({
+  name,
+  onOpenBook,
+  onBooks,
+}: {
+  name: string
+  onOpenBook: (id: number) => void
+  onBooks: (name: string) => void
+}) {
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery({
+    queryKey: ['author-books', name],
+    initialPageParam: undefined as string | undefined,
+    // Series first, so a series reads in order rather than alphabetically.
+    queryFn: ({ pageParam }) =>
+      api.books({ author: name, sort: 'series', limit: 100, cursor: pageParam }),
+    getNextPageParam: (last) => last.next_cursor,
+  })
+  const books: BookListItem[] = data?.pages.flatMap((p) => p.items) ?? []
+
+  if (isLoading) return <p className="browse__empty">Loading books…</p>
+  if (!books.length) return null
+
+  return (
+    <section className="abooks">
+      <div className="abooks__head">
+        <h2>Books</h2>
+        <button className="linkish" onClick={() => onBooks(name)}>
+          Open in the library →
+        </button>
+      </div>
+      <div className="abooks__grid">
+        {books.map((b) => (
+          <button key={b.id} className="abook" onClick={() => onOpenBook(b.id)} title={b.title}>
+            {b.has_cover ? (
+              <img src={coverUrl(b.id, 'grid', b.cover_v)} alt="" loading="lazy" />
+            ) : (
+              <span className="abook__nocover">no cover</span>
+            )}
+            <span className="abook__title">{b.title}</span>
+            {b.series && (
+              <span className="abook__series">
+                {b.series}
+                {b.series_index != null && ` #${b.series_index}`}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+      {hasNextPage && (
+        <button
+          className="btn btn--ghost btn--sm"
+          style={{ marginTop: 12 }}
+          disabled={isFetchingNextPage}
+          onClick={() => void fetchNextPage()}
+        >
+          {isFetchingNextPage ? 'Loading…' : 'Show more'}
+        </button>
+      )}
+    </section>
   )
 }
