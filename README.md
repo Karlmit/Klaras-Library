@@ -55,6 +55,11 @@ critical query starts sequentially scanning `books`.
   author cards with portraits where they exist and initials where they do not, and
   series shown as a fan of their own covers. An author has their own page, where a
   portrait can be uploaded, taken from an address, searched for again, or removed.
+- **Series hiding in titles** — an imported library is full of "Isfolket 12 - Feber i
+  blodet", where the series and its order are in the title and nowhere a program can
+  use them. `klaras series-from-title` reads the number into the series index, names
+  the series and shortens the title, after showing the whole plan and the gaps it
+  found. Nothing is written without `-yes`.
 - **KEPUB on demand** — books on a Kobo shelf are converted ahead of the device
   asking. Any other book can still be downloaded as KEPUB: the server converts it
   on the way out, in about a second. Its button is outlined rather than solid until

@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -76,6 +77,8 @@ func run() error {
 		return cmdFetchDescriptions()
 	case "scan-adult":
 		return cmdScanAdult()
+	case "series-from-title":
+		return cmdSeriesFromTitle()
 	case "relink":
 		return cmdRelink()
 	case "kobo-resync":
@@ -110,6 +113,8 @@ Usage:
                           Undo file moves made since TIME, using the journal
   klaras users            List accounts
   klaras passwd USERNAME  Set an account's password
+  klaras series-from-title -list [-min N]
+  klaras series-from-title -series NAME [-keep-titles] [-yes]
   klaras relink [--dry-run]
   klaras scan-adult [--dry-run]
   klaras fetch-descriptions [--dry-run] [--limit N] [--files-only]
@@ -1148,4 +1153,130 @@ func newLogger(cfg *config.Config) *slog.Logger {
 		return slog.New(slog.NewJSONHandler(os.Stderr, opts))
 	}
 	return slog.New(slog.NewTextHandler(os.Stderr, opts))
+}
+
+// cmdSeriesFromTitle records a series that only ever existed in book titles.
+//
+// A Calibre library imported from elsewhere is full of "Isfolket 12 - Feber i
+// blodet": the series and its order are right there in the title and nowhere a
+// program can use them. This reads the number out into series_index, names the
+// series, and shortens the title to "Isfolket - Feber i blodet".
+func cmdSeriesFromTitle() error {
+	fs := flag.NewFlagSet("series-from-title", flag.ExitOnError)
+	name := fs.String("series", "", "the series name as it appears at the start of the titles")
+	list := fs.Bool("list", false, "list the series-looking prefixes found in titles and stop")
+	minBooks := fs.Int("min", 4, "with -list, how many books a prefix needs before it is listed")
+	keepTitle := fs.Bool("keep-titles", false, "record the series but leave every title as it is")
+	yes := fs.Bool("yes", false, "apply the plan; without this nothing is written")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	db, err := store.Open(ctx, cfg.DatabaseURL, cfg.DBMaxConns, log)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	lib := library.New(db.Pool)
+
+	if *list {
+		cands, err := lib.SeriesCandidatesFromTitles(ctx, *minBooks)
+		if err != nil {
+			return err
+		}
+		sort.Slice(cands, func(i, j int) bool { return cands[i].Books > cands[j].Books })
+		fmt.Fprintf(os.Stderr, "series-looking prefixes in titles (%d or more books):\n\n", *minBooks)
+		for _, c := range cands {
+			fmt.Fprintf(os.Stderr, "  %4d  %s\n", c.Books, c.Prefix)
+		}
+		fmt.Fprintf(os.Stderr, "\nrun again with -series \"<name>\" to see what would change\n")
+		return nil
+	}
+
+	if strings.TrimSpace(*name) == "" {
+		return fmt.Errorf("give -series \"<name>\", or -list to see what is available")
+	}
+
+	plan, err := lib.PlanSeriesFromTitle(ctx, strings.TrimSpace(*name), *keepTitle)
+	if err != nil {
+		return err
+	}
+	if len(plan) == 0 {
+		fmt.Fprintf(os.Stderr, "no books found with titles beginning %q followed by a number\n", *name)
+		return nil
+	}
+
+	sort.Slice(plan, func(i, j int) bool { return plan[i].Index < plan[j].Index })
+
+	renames, warned := 0, 0
+	fmt.Fprintf(os.Stderr, "%d books would join the series %q\n\n", len(plan), *name)
+	for _, it := range plan {
+		mark := " "
+		if it.Warn != "" {
+			mark = "!"
+			warned++
+		}
+		if it.NewTitle != it.OldTitle {
+			renames++
+			fmt.Fprintf(os.Stderr, "%s #%-5g %s\n            -> %s\n", mark, it.Index, it.OldTitle, it.NewTitle)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s #%-5g %s   (title unchanged)\n", mark, it.Index, it.OldTitle)
+		}
+		if it.Warn != "" {
+			fmt.Fprintf(os.Stderr, "            ! %s\n", it.Warn)
+		}
+	}
+
+	// Gaps are worth showing: a series missing #19 is usually a book that was
+	// never imported, and that is better noticed now than wondered about later.
+	if gaps := missingNumbers(plan); len(gaps) > 0 {
+		fmt.Fprintf(os.Stderr, "\nnumbers not present: %s\n", gaps)
+	}
+	fmt.Fprintf(os.Stderr, "\n%d titles renamed, %d flagged\n", renames, warned)
+
+	if !*yes {
+		fmt.Fprintf(os.Stderr, "\nnothing written. Run again with -yes to apply,\n"+
+			"then 'klaras reorganize --dry-run' to see the file moves this implies.\n")
+		return nil
+	}
+
+	n, err := lib.ApplySeriesFromTitle(ctx, plan)
+	if err != nil {
+		return fmt.Errorf("applied %d of %d: %w", n, len(plan), err)
+	}
+	fmt.Fprintf(os.Stderr, "\n%d books updated.\n"+
+		"Their files still sit in the old folders: run 'klaras reorganize --dry-run'\n"+
+		"to see the moves, then again with --yes.\n", n)
+	return nil
+}
+
+// missingNumbers reports the gaps in a series, as a readable range list.
+func missingNumbers(plan []library.SeriesPlanItem) string {
+	if len(plan) == 0 {
+		return ""
+	}
+	have := map[int]bool{}
+	max := 0
+	for _, it := range plan {
+		n := int(it.Index)
+		have[n] = true
+		if n > max {
+			max = n
+		}
+	}
+	var out []string
+	for n := 1; n <= max; n++ {
+		if !have[n] {
+			out = append(out, strconv.Itoa(n))
+		}
+	}
+	return strings.Join(out, ", ")
 }
