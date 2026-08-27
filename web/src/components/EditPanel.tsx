@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, booksApi, coverUrl, editApi, type Book, type BookEdit, type MetadataResult } from '../api'
+import { api, booksApi, coverUrl, editApi, remoteImage, type Book, type BookEdit, type MetadataResult } from '../api'
 import { LookupPicker } from './LookupPicker'
+import { CoverFinder } from './CoverFinder'
 
 interface Props {
   bookId: number
@@ -219,6 +220,7 @@ function CoverSwap({ bookId }: { bookId: number }) {
   const [error, setError] = useState('')
   const [bust, setBust] = useState(0)
   const [url, setUrl] = useState('')
+  const [finding, setFinding] = useState(false)
 
   // Both routes end the same way. The grid has to be invalidated too, or the
   // card behind this panel keeps the old picture until something else refetches
@@ -240,6 +242,7 @@ function CoverSwap({ bookId }: { bookId: number }) {
     mutationFn: (u: string) => booksApi.fetchCover(bookId, u),
     onSuccess: () => {
       setUrl('')
+      setFinding(false)
       replaced()
     },
     onError: (e) => setError((e as Error).message),
@@ -291,11 +294,29 @@ function CoverSwap({ bookId }: { bookId: number }) {
             {fromUrl.isPending ? 'Fetching…' : 'Fetch'}
           </button>
         </form>
+        <div className="coverswap__row">
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            disabled={busy}
+            onClick={() => setFinding((f) => !f)}
+          >
+            {finding ? 'Hide covers' : 'Find covers online'}
+          </button>
+        </div>
         <p className="hint coverswap__hint">
           The server downloads it, so the picture never has to reach your computer first.
         </p>
         {error && <div className="warn" style={{ marginTop: 4 }}>{error}</div>}
       </div>
+      {finding && (
+        <CoverFinder
+          bookId={bookId}
+          busy={fromUrl.isPending}
+          onClose={() => setFinding(false)}
+          onUse={(u) => fromUrl.mutate(u)}
+        />
+      )}
     </div>
   )
 }
@@ -394,7 +415,7 @@ function Lookup({
 
       {results.slice(0, 6).map((r, i) => (
         <button key={i} className="lookup__item" onClick={() => onApply(r)}>
-          {r.cover_url && <img src={r.cover_url} alt="" loading="lazy" />}
+          {r.cover_url && <img src={remoteImage(r.cover_url)} alt="" loading="lazy" />}
           <div style={{ minWidth: 0 }}>
             <strong>{r.title}</strong>
             <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>

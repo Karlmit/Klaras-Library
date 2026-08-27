@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { booksApi, coverUrl, type Book, type BookEdit, type MetadataResult } from '../api'
+import { booksApi, coverUrl, remoteImage, type Book, type BookEdit, type MetadataResult } from '../api'
 
 /** Providers return years, year-months and full dates; the input needs a date. */
 export function normaliseDate(s?: string): string | undefined {
@@ -140,7 +140,7 @@ export function LookupPicker({
             </figure>
             <span className="pick__arrow" aria-hidden="true">→</span>
             <figure>
-              <img src={result.cover_url} alt="" referrerPolicy="no-referrer" />
+              <img src={remoteImage(result.cover_url)} alt="" />
               <figcaption>found</figcaption>
             </figure>
           </div>

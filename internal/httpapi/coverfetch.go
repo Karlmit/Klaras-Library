@@ -11,6 +11,7 @@ import (
 
 	"github.com/Karlmit/Klaras-Library/internal/covers"
 	"github.com/Karlmit/Klaras-Library/internal/jobs"
+	"github.com/Karlmit/Klaras-Library/internal/provider"
 )
 
 // A cover may be fetched from anywhere on the public internet.
@@ -132,4 +133,135 @@ func (s *Server) handleFetchCover(w http.ResponseWriter, r *http.Request) {
 			covers.ThumbnailPayload{BookID: id, UUID: info.UUID, Path: info.Path}, 10)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cover replaced"})
+}
+
+// handleCoverCandidates offers the covers the providers know about, so one can
+// be chosen instead of hunted for in a browser.
+//
+// Nothing here changes the book. It returns addresses; replacing the cover is a
+// second, deliberate request to handleFetchCover with the one that was picked.
+func (s *Server) handleCoverCandidates(w http.ResponseWriter, r *http.Request) {
+	id, err := intParam(r, "id")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad book id")
+		return
+	}
+	b, err := s.lib.GetBook(r.Context(), id, 0)
+	if err != nil {
+		s.fail(w, r, err, "book lookup")
+		return
+	}
+
+	q := provider.Query{Title: b.Title}
+	if len(b.Authors) > 0 {
+		q.Author = b.Authors[0]
+	}
+	if len(b.Languages) > 0 {
+		q.Lang = b.Languages[0]
+	}
+	var isbn string
+	for _, i := range b.Identifiers {
+		if i.Scheme == "isbn" {
+			isbn = i.Value
+			q.ISBN = i.Value
+			break
+		}
+	}
+
+	type candidate struct {
+		Source string `json:"source"`
+		URL    string `json:"url"`
+		Title  string `json:"title,omitempty"`
+	}
+	out := []candidate{}
+	seen := map[string]bool{}
+	add := func(source, u, title string) {
+		if u == "" || seen[u] {
+			return
+		}
+		seen[u] = true
+		out = append(out, candidate{Source: source, URL: u, Title: title})
+	}
+
+	// Open Library serves covers by ISBN directly, and answers for editions its
+	// search does not surface. default=false so a miss is a 404 rather than a
+	// placeholder image, which would otherwise be offered as a real cover.
+	if isbn != "" {
+		add("Open Library", "https://covers.openlibrary.org/b/isbn/"+
+			url.QueryEscape(isbn)+"-L.jpg?default=false", "by ISBN")
+	}
+
+	results, sources := s.providers.SearchWithStatus(r.Context(), q, 20)
+	for _, res := range results {
+		add(res.Source, res.CoverURL, res.Title)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"candidates": out,
+		"sources":    sources,
+	})
+}
+
+// handleCoverProxy fetches a remote image and serves it from this origin.
+//
+// The page's Content-Security-Policy allows images from 'self' only, so a
+// candidate cover cannot be shown by pointing an <img> at Apple or Google --
+// the browser refuses it, and the picture silently never appears. Relaxing the
+// policy would mean listing image hosts in it, which is the allow-list problem
+// again in a worse place.
+//
+// Proxying also keeps the browsing private: choosing a cover does not tell
+// Apple or Google which books are in this library.
+//
+// Same guard as the fetch endpoint -- it is the same client, so a URL naming
+// something inside the network is refused when the connection is made.
+func (s *Server) handleCoverProxy(w http.ResponseWriter, r *http.Request) {
+	raw := strings.TrimSpace(r.URL.Query().Get("url"))
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		writeErr(w, http.StatusBadRequest, "that does not look like an image address")
+		return
+	}
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "that address could not be read")
+		return
+	}
+	req.Header.Set("User-Agent", "Klaras-Library/1 (+https://github.com/Karlmit/Klaras-Library)")
+	req.Header.Set("Accept", "image/*")
+
+	res, err := coverFetchClient.Do(req)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "that image could not be fetched")
+		return
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		// A 404 here is ordinary: Open Library is asked for covers by ISBN that
+		// it may not hold. The caller drops the ones that fail.
+		writeErr(w, http.StatusNotFound, "no image there")
+		return
+	}
+
+	// Sniff rather than trust: whatever is echoed back must not be able to
+	// become script on this origin. Combined with nosniff, a non-image is
+	// refused outright instead of being served as something else.
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(res.Body, head)
+	head = head[:n]
+	ct := http.DetectContentType(head)
+	if !strings.HasPrefix(ct, "image/") {
+		writeErr(w, http.StatusBadRequest, "that address is not an image")
+		return
+	}
+
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	// Long enough that scrolling a grid of candidates does not refetch them,
+	// short enough that nothing is kept for a picture that was never chosen.
+	w.Header().Set("Cache-Control", "private, max-age=600")
+	_, _ = w.Write(head)
+	_, _ = io.Copy(w, io.LimitReader(res.Body, 16<<20))
 }

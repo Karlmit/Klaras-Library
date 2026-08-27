@@ -1140,6 +1140,7 @@ select.sort {
    fetches itself. */
 .coverswap {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   align-items: flex-start;
   margin-bottom: 14px;
@@ -1190,3 +1191,59 @@ select.sort {
 .lookup__terms input { flex: 1 1 8rem; min-width: 0; }
 .lookup__terms .lookup__isbn { flex: 0 1 8rem; }
 .lookup__terms select { flex: 0 1 11rem; }
+
+/* Cover chooser. The whole point is comparing pictures, so the grid gives them
+   room and the chrome stays out of the way. */
+.covers {
+  flex: 1 0 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: var(--v-50);
+}
+.covers__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.covers__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+}
+.covers__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+}
+.covers__item:hover { border-color: var(--v-200); }
+.covers__item--on { border-color: var(--accent); }
+.covers__item img {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: contain;
+  background: var(--v-50);
+  border-radius: 2px;
+}
+.covers__meta {
+  font-size: 10px;
+  line-height: 1.25;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+}
+.covers__meta em { font-style: normal; font-variant-numeric: tabular-nums; }
+.covers__foot {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}

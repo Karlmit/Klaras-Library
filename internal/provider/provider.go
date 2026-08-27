@@ -67,10 +67,12 @@ type Set struct {
 
 // NewSet builds the default provider set.
 //
-// Both are free and need no API key, which matters for a self-hosted app: a
-// setup step that requires registering for a key is a setup step most people
-// never complete. Google Books has better coverage of Swedish titles; Open
-// Library is a good second opinion and has better series data.
+// All three are free and need no API key, which matters for a self-hosted app:
+// a setup step that requires registering for a key is a setup step most people
+// never complete. Apple Books has the best hit rate on Swedish titles and much
+// the largest cover art; Google Books is close behind and is the one with
+// blurbs for ISBN lookups; Open Library is weak here but has the best series
+// data and reaches older and more obscure records the other two miss.
 func NewSet(lang string) *Set { return NewSetWithKey(lang, "") }
 
 // NewSetWithKey is NewSet with a Google Books API key, which raises the daily
@@ -78,6 +80,7 @@ func NewSet(lang string) *Set { return NewSetWithKey(lang, "") }
 func NewSetWithKey(lang, googleKey string) *Set {
 	return &Set{providers: []Provider{
 		&googleBooks{lang: lang, key: googleKey},
+		newAppleBooks(lang),
 		&openLibrary{},
 	}}
 }

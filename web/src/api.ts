@@ -271,6 +271,17 @@ export interface LookupOpts {
   provider?: string
 }
 
+// Remote cover images are served through the app rather than linked directly:
+// the page's CSP allows images from this origin only, and proxying also keeps
+// which books are in this library from reaching Apple or Google.
+export const remoteImage = (url: string) => `/api/cover-proxy?url=${encodeURIComponent(url)}`
+
+export interface CoverCandidate {
+  source: string
+  url: string
+  title?: string
+}
+
 export interface ProviderStatus {
   name: string
   count: number
@@ -437,6 +448,11 @@ export const booksApi = {
     for (const f of files) form.append('file', f)
     return upload<{ results: UploadResult[] }>('/api/books/upload', form)
   },
+
+  coverCandidates: (id: number) =>
+    req<{ candidates: CoverCandidate[]; sources: ProviderStatus[] }>(
+      `/api/books/${id}/cover/candidates`,
+    ),
 
   fetchCover: (id: number, url: string) =>
     req<{ status: string }>(`/api/books/${id}/cover/fetch`, {

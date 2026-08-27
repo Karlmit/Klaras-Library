@@ -177,6 +177,8 @@ func (s *Server) routes() {
 				r.Post("/books/upload", s.handleUploadBook)
 				r.Put("/books/{id}/cover", s.handleReplaceCover)
 				r.Post("/books/{id}/cover/fetch", s.handleFetchCover)
+				r.Get("/books/{id}/cover/candidates", s.handleCoverCandidates)
+				r.Get("/cover-proxy", s.handleCoverProxy)
 			})
 
 			// Account administration.
