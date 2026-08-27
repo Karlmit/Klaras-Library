@@ -16,8 +16,8 @@ export function EditPanel({ bookId, onClose }: Props) {
 
   const [form, setForm] = useState<BookEdit>({})
   const [error, setError] = useState('')
-  const [lookupOpen, setLookupOpen] = useState(false)
   const [chosen, setChosen] = useState<MetadataResult | null>(null)
+  const [tab, setTab] = useState<TabKey>('details')
 
   // Seed the form from the book once per book, not on every change to it.
   // Fetching a cover invalidates this query on purpose (so the thumbnail
@@ -39,25 +39,50 @@ export function EditPanel({ bookId, onClose }: Props) {
       tags: book.tags,
       languages: book.languages,
       rating: book.rating,
+      isbn: (book.identifiers ?? []).find((i) => i.scheme === 'isbn')?.value ?? '',
     })
   }, [book, bookId])
 
+  // Save and Save & Close are different intentions, so closing is the caller's
+  // decision rather than something the mutation always does.
+  const closeAfter = useRef(false)
+  const [saved, setSaved] = useState(false)
   const save = useMutation({
     mutationFn: (e: BookEdit) => editApi.one(bookId, e),
     onSuccess: () => {
+      setError('')
       void qc.invalidateQueries({ queryKey: ['book', bookId] })
       void qc.invalidateQueries({ queryKey: ['books'] })
       void qc.invalidateQueries({ queryKey: ['facets'] })
-      onClose()
+      if (closeAfter.current) {
+        onClose()
+        return
+      }
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 2500)
     },
     onError: (e) => setError((e as Error).message),
   })
 
+  const commit = (andClose: boolean) => {
+    closeAfter.current = andClose
+    save.mutate(form)
+  }
+
+  // Escape closes, as it does for every other overlay here.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   if (!book) {
     return (
       <>
-        <div className="drawer-backdrop" onClick={onClose} />
-        <aside className="drawer">Loading…</aside>
+        <div className="emodal-backdrop" onClick={onClose} />
+        <div className="emodal emodal--loading">Loading…</div>
       </>
     )
   }
@@ -67,151 +92,248 @@ export function EditPanel({ bookId, onClose }: Props) {
 
   return (
     <>
-      <div className="drawer-backdrop" onClick={onClose} />
-      <aside className="drawer" role="dialog" aria-label="Edit book" aria-modal="true">
-        <button className="drawer__close" onClick={onClose} aria-label="Close">
-          ×
-        </button>
-        <h2 style={{ marginTop: 0 }}>Edit metadata</h2>
-
-        {error && <div className="error">{error}</div>}
-
-        <CoverSwap bookId={bookId} />
-
-        <button className="btn btn--ghost btn--sm" onClick={() => setLookupOpen((v) => !v)}>
-          {lookupOpen ? 'Hide lookup' : 'Look up online…'}
-        </button>
-
-        {lookupOpen && !chosen && (
-          <Lookup bookId={bookId} onApply={(r) => setChosen(r)} />
-        )}
-
-        {lookupOpen && chosen && book && (
-          <LookupPicker
-            bookId={bookId}
-            book={book}
-            result={chosen}
-            onBack={() => setChosen(null)}
-            onApply={(patch: Partial<BookEdit>) => {
-              // Into the form, never straight to the database: a provider
-              // routinely returns a different edition, and the person editing
-              // is the one who can tell.
-              setForm((f) => ({ ...f, ...patch }))
-              setChosen(null)
-              setLookupOpen(false)
-              void qc.invalidateQueries({ queryKey: ['book', bookId] })
-            }}
-          />
-        )}
-
-        <form
-          style={{ marginTop: 14 }}
-          onSubmit={(e) => {
-            e.preventDefault()
-            save.mutate(form)
-          }}
-        >
-          <Field label="Title">
-            <input value={form.title ?? ''} onChange={(e) => set('title', e.target.value)} />
-          </Field>
-          <Field label="Authors (one per line)">
-            <textarea
-              rows={3}
-              value={(form.authors ?? []).join('\n')}
-              onChange={(e) =>
-                set('authors', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))
-              }
-            />
-          </Field>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10 }}>
-            <Field label="Series">
-              <input value={form.series ?? ''} onChange={(e) => set('series', e.target.value)} />
-            </Field>
-            <Field label="Number">
-              <input
-                type="number"
-                step="0.1"
-                value={form.series_index ?? ''}
-                onChange={(e) =>
-                  set('series_index', e.target.value === '' ? undefined : Number(e.target.value))
-                }
-              />
-            </Field>
+      <div className="emodal-backdrop" onClick={onClose} />
+      <div className="emodal" role="dialog" aria-modal="true" aria-label={`Edit ${book.title}`}>
+        <header className="emodal__head">
+          <div className="emodal__who">
+            <h2>{book.title}</h2>
+            <p>{(book.authors ?? []).join(', ')}</p>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10 }}>
-            <Field label="Publisher">
-              <input
-                value={form.publisher ?? ''}
-                onChange={(e) => set('publisher', e.target.value)}
-              />
-            </Field>
-            <Field label="Published">
-              <input
-                type="date"
-                value={form.pubdate ?? ''}
-                onChange={(e) => set('pubdate', e.target.value)}
-              />
-            </Field>
-          </div>
-          <Field label="Languages (comma separated, three-letter codes)">
-            <input
-              value={(form.languages ?? []).join(', ')}
-              onChange={(e) =>
-                set(
-                  'languages',
-                  e.target.value.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
-                )
-              }
-              placeholder="swe, eng"
-            />
-            <p className="hint" style={{ margin: '4px 0 0' }}>
-              ISO 639-2 codes: swe, eng, dan, nor, deu, fra, ara. These are what the
-              Languages filter groups by, and what a Kobo is told about the book.
-            </p>
-          </Field>
+          <button className="emodal__close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </header>
 
-          <Field label="Rating (0–10, half stars)">
-            <input
-              type="number" min={0} max={10} step={1}
-              value={form.rating ?? ''}
-              onChange={(e) =>
-                set('rating', e.target.value === '' ? undefined : Number(e.target.value))
-              }
-            />
-          </Field>
-
-          <Field label="Categories (comma separated)">
-            <input
-              value={(form.tags ?? []).join(', ')}
-              onChange={(e) =>
-                set('tags', e.target.value.split(',').map((s) => s.trim()).filter(Boolean))
-              }
-            />
-          </Field>
-          <Field label="Description">
-            <textarea
-              rows={6}
-              value={form.description ?? ''}
-              onChange={(e) => set('description', e.target.value)}
-            />
-          </Field>
-
-          <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Changing the title, author or series moves this book's files into the
-            matching folder. Other books are not touched.
-          </p>
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" type="submit" disabled={save.isPending}>
-              {save.isPending ? 'Saving…' : 'Save'}
+        <nav className="emodal__tabs" role="tablist">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              role="tab"
+              aria-selected={tab === t.key}
+              className={`emodal__tab ${tab === t.key ? 'emodal__tab--on' : ''}`}
+              onClick={() => setTab(t.key)}
+            >
+              {t.label}
             </button>
+          ))}
+        </nav>
+
+        <div className="emodal__body">
+          {error && <div className="error">{error}</div>}
+
+          {tab === 'details' && (
+            <form
+              className="eform"
+              onSubmit={(e) => {
+                e.preventDefault()
+                commit(false)
+              }}
+            >
+              <div className="eform__grid">
+                <Field label="Title">
+                  <input value={form.title ?? ''} onChange={(e) => set('title', e.target.value)} />
+                </Field>
+                <Field label="Published">
+                  <input
+                    type="date"
+                    value={form.pubdate ?? ''}
+                    onChange={(e) => set('pubdate', e.target.value)}
+                  />
+                </Field>
+              </div>
+
+              <Field label="Authors (one per line)">
+                <textarea
+                  rows={3}
+                  value={(form.authors ?? []).join('\n')}
+                  onChange={(e) =>
+                    set('authors', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))
+                  }
+                />
+              </Field>
+
+              <div className="eform__grid eform__grid--series">
+                <Field label="Series">
+                  <input value={form.series ?? ''} onChange={(e) => set('series', e.target.value)} />
+                </Field>
+                <Field label="Number">
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={form.series_index ?? ''}
+                    onChange={(e) =>
+                      set('series_index', e.target.value === '' ? undefined : Number(e.target.value))
+                    }
+                  />
+                </Field>
+              </div>
+
+              <Field label="Description">
+                <textarea
+                  rows={7}
+                  value={form.description ?? ''}
+                  onChange={(e) => set('description', e.target.value)}
+                />
+              </Field>
+
+              <div className="eform__grid">
+                <Field label="Publisher">
+                  <input
+                    value={form.publisher ?? ''}
+                    onChange={(e) => set('publisher', e.target.value)}
+                  />
+                </Field>
+                <Field label="ISBN">
+                  <input
+                    value={form.isbn ?? ''}
+                    placeholder="9789100138813"
+                    spellCheck={false}
+                    onChange={(e) => set('isbn', e.target.value)}
+                  />
+                </Field>
+              </div>
+
+              <div className="eform__grid">
+                <Field label="Categories (comma separated)">
+                  <input
+                    value={(form.tags ?? []).join(', ')}
+                    onChange={(e) =>
+                      set('tags', e.target.value.split(',').map((s) => s.trim()).filter(Boolean))
+                    }
+                  />
+                </Field>
+                <Field label="Rating (0–10, half stars)">
+                  <input
+                    type="number" min={0} max={10} step={1}
+                    value={form.rating ?? ''}
+                    onChange={(e) =>
+                      set('rating', e.target.value === '' ? undefined : Number(e.target.value))
+                    }
+                  />
+                </Field>
+              </div>
+
+              <Field label="Languages (comma separated, three-letter codes)">
+                <input
+                  value={(form.languages ?? []).join(', ')}
+                  onChange={(e) =>
+                    set(
+                      'languages',
+                      e.target.value.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+                    )
+                  }
+                  placeholder="swe, eng"
+                />
+                <p className="hint" style={{ margin: '4px 0 0' }}>
+                  ISO 639-2 codes: swe, eng, dan, nor, deu, fra, ara. These are what the
+                  Languages filter groups by, and what a Kobo is told about the book.
+                </p>
+              </Field>
+
+              {/* Submitting with Enter should save, and a form needs a submit
+                  button for that to work even when the visible one is in the
+                  footer outside it. */}
+              <button type="submit" hidden />
+            </form>
+          )}
+
+          {tab === 'cover' && <CoverSwap bookId={bookId} />}
+
+          {tab === 'match' && (
+            <>
+              {!chosen && <Lookup bookId={bookId} onApply={(r) => setChosen(r)} />}
+              {chosen && (
+                <LookupPicker
+                  bookId={bookId}
+                  book={book}
+                  result={chosen}
+                  onBack={() => setChosen(null)}
+                  onApply={(patch: Partial<BookEdit>) => {
+                    // Into the form, never straight to the database: a provider
+                    // routinely returns a different edition, and the person
+                    // editing is the one who can tell. Landing on Details makes
+                    // that visible rather than leaving it to be discovered.
+                    setForm((f) => ({ ...f, ...patch }))
+                    setChosen(null)
+                    setTab('details')
+                    void qc.invalidateQueries({ queryKey: ['book', bookId] })
+                  }}
+                />
+              )}
+            </>
+          )}
+
+          {tab === 'files' && <FilesTab book={book} />}
+        </div>
+
+        <footer className="emodal__foot">
+          <span className="hint">
+            {saved
+              ? 'Saved.'
+              : 'Changing the title, author or series moves this book\u2019s files into the matching folder. Other books are not touched.'}
+          </span>
+          <div className="emodal__actions">
             <button className="btn btn--ghost" type="button" onClick={onClose}>
               Cancel
             </button>
+            <button className="btn btn--ghost" type="button" disabled={save.isPending}
+                    onClick={() => commit(false)}>
+              {save.isPending && !closeAfter.current ? 'Saving…' : 'Save'}
+            </button>
+            <button className="btn" type="button" disabled={save.isPending}
+                    onClick={() => commit(true)}>
+              Save & Close
+            </button>
           </div>
-        </form>
-      </aside>
+        </footer>
+      </div>
     </>
+  )
+}
+
+const TABS = [
+  { key: 'details', label: 'Details' },
+  { key: 'cover', label: 'Cover' },
+  { key: 'match', label: 'Match' },
+  { key: 'files', label: 'Files' },
+] as const
+
+type TabKey = (typeof TABS)[number]['key']
+
+/** What is actually on disk for this book. Read-only: this is for checking. */
+function FilesTab({ book }: { book: Book }) {
+  const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`
+  return (
+    <div className="files">
+      <Field label="Folder">
+        <input value={book.path} readOnly spellCheck={false} />
+      </Field>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Format</th>
+              <th>File</th>
+              <th style={{ textAlign: 'right' }}>Size</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(book.files ?? []).map((f) => (
+              <tr key={f.filename}>
+                <td>{f.format}</td>
+                <td style={{ wordBreak: 'break-all' }}>{f.filename}</td>
+                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {mb(f.size_bytes)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!(book.files ?? []).length && (
+        <p style={{ color: 'var(--text-muted)' }}>No files recorded for this book.</p>
+      )}
+    </div>
   )
 }
 

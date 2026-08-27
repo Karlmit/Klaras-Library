@@ -48,7 +48,10 @@ critical query starts sequentially scanning `books`.
 - **Managed file tree** — `Author/Series/Title`, with every move journalled so a
   crash cannot leave the database and the disk disagreeing.
 - **Watch folder** — drop files in and they are imported, filed and converted.
-- **Metadata lookup** — Apple Books, Google Books and Open Library, searched together. Results open
+- **Editing** — a book opens in a tabbed sheet: Details, Cover, Match, Files. Full
+  screen on a phone, a centred dialog on a desktop.
+- **Metadata lookup** — Apple Books, Google Books, Libris and Open Library, searched
+  together. Results open
   as a field-by-field checklist. Each found value sits in an editable field with what
   the book holds today as a caption beneath it, so a value can be corrected before it
   is taken. The cover is shown new beside current, both with their real pixel
@@ -65,7 +68,9 @@ critical query starts sequentially scanning `books`.
 
   On a sample of 24 random books from this library, Apple Books had a cover for 83%,
   Google Books 66%, and Open Library 4% — Open Library earns its place on series data
-  and obscure records, not on covers.
+  and obscure records, not on covers. Libris, the Swedish national catalogue, has no
+  cover images at all; it is there because it had a record with an ISBN for 91% of the
+  same sample, and an ISBN is what the other sources need to find anything.
 - **OPDS 1.2 and 2.0** — for KOReader, Moon+ Reader and friends.
 - **In-browser reader** — lazy-loaded, so it costs nothing until used.
 - **Multi-user** — admin, editor and reader roles, per-user shelves and Kobo tokens.

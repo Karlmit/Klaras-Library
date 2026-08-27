@@ -34,6 +34,10 @@ type bookEdit struct {
 	Languages   *[]string `json:"languages"`
 	Rating      *int16    `json:"rating"`
 	NeedsReview *bool     `json:"needs_review"`
+	// ISBN is the one identifier worth editing by hand. It is the key the
+	// providers are searched by, so a book without one is unreachable for
+	// blurbs and cover matching until somebody supplies it.
+	ISBN *string `json:"isbn"`
 }
 
 // touchesPath reports whether an edit changes anything the managed tree's
@@ -162,6 +166,11 @@ func (s *Server) applyEdit(ctx context.Context, id int64, e *bookEdit) error {
 			return err
 		}
 	}
+	if e.ISBN != nil {
+		if err := setISBN(ctx, tx, id, *e.ISBN); err != nil {
+			return err
+		}
+	}
 	if e.PubDate != nil {
 		var d any
 		if t, err := time.Parse("2006-01-02", strings.TrimSpace(*e.PubDate)); err == nil {
@@ -172,6 +181,35 @@ func (s *Server) applyEdit(ctx context.Context, id int64, e *bookEdit) error {
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// setISBN replaces a book's ISBN, or clears it when given nothing.
+//
+// Only the isbn scheme is touched: a book may carry a Calibre uuid, a Google
+// volume id and others, and replacing the whole identifier set to change one
+// value would quietly discard them.
+func setISBN(ctx context.Context, tx pgx.Tx, bookID int64, raw string) error {
+	v := strings.Map(func(r rune) rune {
+		// ISBNs are written with hyphens and spaces about as often as without,
+		// and an X check digit is legal. Storing them one way means a search
+		// finds them however they were typed.
+		if r == '-' || r == ' ' {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(raw))
+
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM identifiers WHERE book_id=$1 AND scheme='isbn'`, bookID); err != nil {
+		return err
+	}
+	if v == "" {
+		return nil
+	}
+	_, err := tx.Exec(ctx,
+		`INSERT INTO identifiers (book_id, scheme, value) VALUES ($1,'isbn',$2)
+		 ON CONFLICT DO NOTHING`, bookID, v)
+	return err
 }
 
 func arrOrNil(p *[]string) any {

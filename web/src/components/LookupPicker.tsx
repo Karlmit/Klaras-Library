@@ -10,7 +10,7 @@ export function normaliseDate(s?: string): string | undefined {
   return undefined
 }
 
-type FieldKey = 'title' | 'authors' | 'series' | 'publisher' | 'pubdate' | 'description' | 'tags'
+type FieldKey = 'title' | 'authors' | 'series' | 'publisher' | 'pubdate' | 'description' | 'tags' | 'isbn'
 
 interface Row {
   key: FieldKey
@@ -63,6 +63,11 @@ export function LookupPicker({
          normaliseDate(result.pubdate) ?? ''),
       mk('description', 'Description', book.description ?? '', result.description ?? ''),
       mk('tags', 'Categories', (book.tags ?? []).join(', '), (result.tags ?? []).join(', ')),
+      // Worth its own row: an ISBN is what the providers are searched by, so
+      // filling one in is what makes the next lookup work at all.
+      mk('isbn', 'ISBN',
+         (book.identifiers ?? []).find((i) => i.scheme === 'isbn')?.value ?? '',
+         result.identifiers?.isbn ?? ''),
     ].filter(Boolean) as Row[]
     // A row whose two sides already say the same thing is not a choice; it is
     // noise in a list someone has to read. Count them instead, so the panel can
@@ -131,6 +136,7 @@ export function LookupPicker({
         else if (r.key === 'series') patch.series = v
         else if (r.key === 'publisher') patch.publisher = v
         else if (r.key === 'description') patch.description = v
+        else if (r.key === 'isbn') patch.isbn = v
       }
       onApply(patch)
     } catch (e) {

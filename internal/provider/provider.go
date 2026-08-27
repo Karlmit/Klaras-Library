@@ -81,6 +81,7 @@ func NewSetWithKey(lang, googleKey string) *Set {
 	return &Set{providers: []Provider{
 		&googleBooks{lang: lang, key: googleKey},
 		newAppleBooks(lang),
+		&libris{},
 		&openLibrary{},
 	}}
 }

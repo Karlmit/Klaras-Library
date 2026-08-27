@@ -194,6 +194,7 @@ export interface Shelf {
 
 export interface MetadataResult {
   source: string
+  identifiers?: Record<string, string>
   title: string
   authors?: string[]
   series?: string
@@ -218,6 +219,7 @@ export interface BookEdit {
   languages?: string[]
   rating?: number
   needs_review?: boolean
+  isbn?: string
 }
 
 export const shelvesApi = {

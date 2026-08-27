@@ -1271,3 +1271,93 @@ select.sort {
     .pick__all { grid-template-columns: 22px 1fr; }
     .pick__all .hint { grid-column: 2; }
 }
+
+/* ── Edit modal ───────────────────────────────────────────────────────────
+   A centred sheet rather than a side drawer. Editing a book means comparing
+   fields against each other and against what a provider suggested, and a
+   380px column made that a scrolling exercise. Tabs keep the four jobs --
+   metadata, cover, matching, files -- from stacking into one long page. */
+.emodal-backdrop {
+    position: fixed; inset: 0; z-index: 60;
+    background: rgb(31 31 35 / 0.45);
+}
+.emodal {
+    position: fixed; z-index: 61;
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: min(1000px, calc(100vw - 48px));
+    /* A fixed height, not a maximum: with max-height the sheet resizes every
+       time you change tab, and the footer buttons walk up and down the screen
+       under the pointer. */
+    height: min(860px, calc(100vh - 48px));
+    display: flex; flex-direction: column;
+    background: var(--surface);
+    border-radius: var(--radius-lg, 12px);
+    box-shadow: 0 24px 60px -12px rgb(0 0 0 / 0.35);
+    overflow: hidden;
+}
+.emodal--loading { padding: 24px; }
+
+.emodal__head {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 16px 18px 12px;
+}
+.emodal__who { min-width: 0; }
+.emodal__who h2 {
+    margin: 0; font-size: 19px; line-height: 1.25;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.emodal__who p { margin: 2px 0 0; font-size: 13px; color: var(--text-muted); }
+.emodal__close {
+    margin-left: auto; flex: none;
+    width: 32px; height: 32px; border-radius: var(--radius-sm);
+    border: 0; background: transparent; cursor: pointer;
+    font-size: 22px; line-height: 1; color: var(--text-muted);
+}
+.emodal__close:hover { background: var(--surface-sunken); color: var(--text); }
+
+.emodal__tabs {
+    display: flex; gap: 2px; padding: 0 18px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto; scrollbar-width: none;
+}
+.emodal__tabs::-webkit-scrollbar { display: none; }
+.emodal__tab {
+    flex: none; padding: 9px 16px; border: 0; background: transparent;
+    cursor: pointer; font: inherit; font-size: 13.5px; color: var(--text-muted);
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.emodal__tab:hover { color: var(--text); }
+.emodal__tab--on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+.emodal__body { padding: 16px 18px; overflow-y: auto; flex: 1; }
+
+.emodal__foot {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 18px; border-top: 1px solid var(--border);
+    background: var(--shell);
+}
+.emodal__foot .hint { margin: 0; flex: 1; min-width: 12rem; }
+.emodal__actions { display: flex; gap: 8px; margin-left: auto; }
+
+/* Two fields to a row where they are short enough to pair. */
+.eform__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.eform__grid--series { grid-template-columns: 3fr 1fr; }
+
+/* The edit sheet fills a phone rather than floating in it: at 360px a centred
+   dialog with margins wastes the only space there is. */
+@media (max-width: 820px) {
+    .emodal {
+        top: 0; left: 0; transform: none;
+        width: 100vw; height: 100dvh; max-height: none;
+        border-radius: 0;
+    }
+    .emodal__head { padding: 12px 14px 8px; }
+    .emodal__tabs { padding: 0 14px; }
+    .emodal__body { padding: 14px; }
+    .emodal__foot { padding: 10px 14px; }
+    .emodal__foot .hint { display: none; }
+    .emodal__actions { width: 100%; }
+    .emodal__actions .btn { flex: 1; }
+    /* One field per row; two never fit legibly. */
+    .eform__grid, .eform__grid--series { grid-template-columns: 1fr; }
+}
