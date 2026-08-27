@@ -1464,3 +1464,42 @@ select.sort {
     background: var(--v-50); border: 1px solid var(--v-200); color: var(--v-900);
     padding: 8px 10px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 12px;
 }
+
+/* A trail back to where you came from. Only shown where a page is genuinely
+   nested -- one author sits under Authors; Authors itself sits under nothing. */
+.crumbs {
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 4px 10px; font-size: 12.5px; color: var(--text-muted);
+}
+.linkish {
+    border: 0; background: transparent; padding: 0; cursor: pointer;
+    font: inherit; color: var(--v-600);
+}
+.linkish:hover { text-decoration: underline; }
+
+/* One author's page. */
+.apage { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; padding: 4px; }
+.apage__face {
+    width: 180px; height: 180px; flex: none; border-radius: 50%;
+    overflow: hidden; display: grid; place-items: center;
+    background: var(--v-100); box-shadow: 0 2px 10px -2px rgb(0 0 0 / 0.15);
+}
+.apage__face img { width: 100%; height: 100%; object-fit: cover; }
+.apage__none { font-size: 12px; color: var(--text-muted); }
+.apage__meta { min-width: 0; flex: 1 1 20rem; }
+.apage__meta h1 { margin: 0 0 4px; font-size: 22px; }
+.apage__count { margin: 0 0 8px; }
+.apage__actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 10px; }
+.apage__url { display: flex; gap: 8px; align-items: center; max-width: 30rem; }
+.apage__url input {
+    flex: 1; min-width: 0; height: 36px; padding: 0 10px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    background: var(--surface); color: var(--text); font: inherit;
+}
+.apage__url input:focus { border-color: var(--accent); outline: none; }
+
+@media (max-width: 820px) {
+    .apage { gap: 14px; }
+    .apage__face { width: 120px; height: 120px; }
+    .apage__meta h1 { font-size: 18px; }
+}

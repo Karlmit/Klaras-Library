@@ -19,7 +19,7 @@ import { browseApi, portraitUrl, type AuthorEntry } from '../api'
  * library's own palette so a screen full of them reads as a design rather than
  * as a screen full of missing images.
  */
-export function AuthorsView({ onPick }: { onPick: (name: string) => void }) {
+export function AuthorsView({ onPick }: { onPick: (id: number) => void }) {
   const { data, isLoading } = useQuery({
     queryKey: ['authors'],
     queryFn: browseApi.authors,
@@ -119,7 +119,7 @@ function AuthorCard({
   onPick,
 }: {
   author: AuthorEntry
-  onPick: (name: string) => void
+  onPick: (id: number) => void
 }) {
   // The list says whether a portrait exists, so a card that has none never
   // asks for one. Guessing and handling the 404 would mean a request and a
@@ -127,7 +127,7 @@ function AuthorCard({
   const [failed, setFailed] = useState(false)
   const showPhoto = author.has_portrait && !failed
   return (
-    <button className="acard" onClick={() => onPick(author.name)} title={author.name}>
+    <button className="acard" onClick={() => onPick(author.id)} title={author.name}>
       <span className="acard__face" style={{ background: tintFor(author.name) }}>
         {showPhoto ? (
           <img

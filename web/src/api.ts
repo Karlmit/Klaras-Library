@@ -242,8 +242,35 @@ export interface SeriesEntry {
   covers: { id: number; cover_v: number }[]
 }
 
+export interface AuthorDetail {
+  id: number
+  name: string
+  sort: string
+  books: number
+  has_portrait: boolean
+  portrait_from?: string
+  portrait_tried: boolean
+}
+
 export const browseApi = {
   authors: () => req<{ authors: AuthorEntry[] }>('/api/authors'),
+  author: (id: number) => req<AuthorDetail>(`/api/authors/${id}`),
+
+  setPortrait: (id: number, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return upload<{ status: string }>(`/api/authors/${id}/portrait`, form, 'PUT')
+  },
+  fetchPortrait: (id: number, url: string) =>
+    req<{ status: string }>(`/api/authors/${id}/portrait/fetch`, {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+  lookUpPortrait: (id: number) =>
+    req<{ status: string }>(`/api/authors/${id}/portrait/lookup`, { method: 'POST' }),
+  clearPortrait: (id: number) =>
+    req<{ status: string }>(`/api/authors/${id}/portrait`, { method: 'DELETE' }),
+
   series: () => req<{ series: SeriesEntry[] }>('/api/series'),
   mergeTags: (from: string[], to: string) =>
     req<{ status: string; books: number }>(

@@ -14,6 +14,8 @@ interface Props {
   onDiscover?: () => void
   onAuthors: () => void
   onSeries: () => void
+  /** Which browse page is showing, so the sidebar can say where you are. */
+  here?: 'authors' | 'series' | null
   /** Editors only: merging categories changes the library. */
   onCategories?: () => void
 }
@@ -27,7 +29,7 @@ interface Props {
  */
 export function Sidebar({
   query, onChange, isAdmin, open = false, account, onDiscover,
-  onAuthors, onSeries, onCategories,
+  onAuthors, onSeries, onCategories, here = null,
 }: Props) {
   const { data } = useQuery({ queryKey: ['facets'], queryFn: () => api.facets(), staleTime: 60_000 })
   const { data: shelves } = useQuery({ queryKey: ['shelves'], queryFn: shelvesApi.list })
@@ -122,11 +124,11 @@ export function Sidebar({
           never fit in a sidebar, and the fifteen that did were the fifteen
           with the most books rather than the one being looked for. */}
       <div className="navhead">Browse</div>
-      <button className="navitem" onClick={onAuthors}>
+      <button className={`navitem ${here === 'authors' ? 'navitem--active' : ''}`} onClick={onAuthors}>
         <span className="navitem__label">Authors</span>
         <span className="navitem__count">{data?.authors_total?.toLocaleString('sv-SE') ?? ''}</span>
       </button>
-      <button className="navitem" onClick={onSeries}>
+      <button className={`navitem ${here === 'series' ? 'navitem--active' : ''}`} onClick={onSeries}>
         <span className="navitem__label">Series</span>
         <span className="navitem__count">{data?.series_total?.toLocaleString('sv-SE') ?? ''}</span>
       </button>

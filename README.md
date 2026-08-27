@@ -48,9 +48,13 @@ critical query starts sequentially scanning `books`.
 - **Managed file tree** — `Author/Series/Title`, with every move journalled so a
   crash cannot leave the database and the disk disagreeing.
 - **Watch folder** — drop files in and they are imported, filed and converted.
+- **Addressable** — every view has a URL. Back and Forward are the browser's own,
+  a filtered list or an author's page can be bookmarked or shared, and a reload
+  lands where you were rather than at the top of the library.
 - **Browsing** — Authors and Series are pages rather than sidebar lists: a wall of
   author cards with portraits where they exist and initials where they do not, and
-  series shown as a fan of their own covers.
+  series shown as a fan of their own covers. An author has their own page, where a
+  portrait can be uploaded, taken from an address, searched for again, or removed.
 - **Editing** — a book opens in a tabbed sheet: Details, Cover, Match, Files. Full
   screen on a phone, a centred dialog on a desktop.
 - **Tidying categories** — an import leaves the same category written several ways

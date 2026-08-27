@@ -3,7 +3,9 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/Karlmit/Klaras-Library/internal/library"
@@ -106,4 +108,140 @@ func (s *Server) handleMergeTags(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("facet refresh after merge failed", "err", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "books": n})
+}
+
+// handleAuthor serves one author's page.
+func (s *Server) handleAuthor(w http.ResponseWriter, r *http.Request) {
+	id, err := intParam(r, "id")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad author id")
+		return
+	}
+	a, err := s.lib.Author(r.Context(), id)
+	if err != nil {
+		s.fail(w, r, err, "author")
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
+// handleAuthorPortraitUpload replaces an author's picture with an uploaded file.
+func (s *Server) handleAuthorPortraitUpload(w http.ResponseWriter, r *http.Request) {
+	id, err := intParam(r, "id")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad author id")
+		return
+	}
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		writeErr(w, http.StatusBadRequest, "could not read the upload")
+		return
+	}
+	f, _, err := r.FormFile("file")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "no file in the upload")
+		return
+	}
+	defer f.Close()
+
+	if err := s.lib.SetPortrait(r.Context(), s.cfg.CacheDir, id, f, "uploaded"); err != nil {
+		if errors.Is(err, library.ErrNotAnImage) {
+			writeErr(w, http.StatusBadRequest, "that file could not be read as an image")
+			return
+		}
+		s.fail(w, r, err, "set portrait")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "portrait set"})
+}
+
+// handleAuthorPortraitFetch takes a picture from a URL, with the same guard as
+// book covers: the server opens whatever address it is given, so it must not be
+// able to reach anything inside this network.
+func (s *Server) handleAuthorPortraitFetch(w http.ResponseWriter, r *http.Request) {
+	id, err := intParam(r, "id")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad author id")
+		return
+	}
+	var in struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request body")
+		return
+	}
+	u, err := url.Parse(strings.TrimSpace(in.URL))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		writeErr(w, http.StatusBadRequest, "that does not look like an image address")
+		return
+	}
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "that address could not be read")
+		return
+	}
+	req.Header.Set("User-Agent", "Klaras-Library/1 (+https://github.com/Karlmit/Klaras-Library)")
+	req.Header.Set("Accept", "image/*")
+
+	res, err := coverFetchClient.Do(req)
+	if err != nil {
+		if strings.Contains(err.Error(), "is not a public address") {
+			writeErr(w, http.StatusBadRequest,
+				"that address is inside this network, so it will not be fetched")
+			return
+		}
+		writeErr(w, http.StatusBadGateway, "that picture could not be downloaded")
+		return
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		writeErr(w, http.StatusBadGateway, "that address returned an error")
+		return
+	}
+
+	if err := s.lib.SetPortrait(r.Context(), s.cfg.CacheDir, id,
+		io.LimitReader(res.Body, 8<<20), u.String()); err != nil {
+		if errors.Is(err, library.ErrNotAnImage) {
+			writeErr(w, http.StatusBadRequest, "that address is not an image")
+			return
+		}
+		s.fail(w, r, err, "set portrait")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "portrait set"})
+}
+
+// handleAuthorPortraitDelete removes an author's picture.
+func (s *Server) handleAuthorPortraitDelete(w http.ResponseWriter, r *http.Request) {
+	id, err := intParam(r, "id")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad author id")
+		return
+	}
+	if err := s.lib.ClearPortrait(r.Context(), s.cfg.CacheDir, id); err != nil {
+		s.fail(w, r, err, "clear portrait")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "portrait cleared"})
+}
+
+// handleAuthorPortraitLookup searches again for an author whose sweep found
+// nothing -- useful once a misspelled name has been corrected.
+func (s *Server) handleAuthorPortraitLookup(w http.ResponseWriter, r *http.Request) {
+	id, err := intParam(r, "id")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad author id")
+		return
+	}
+	err = s.lib.LookUpPortrait(r.Context(), s.cfg.CacheDir, id)
+	if errors.Is(err, library.ErrNoPortrait) {
+		writeErr(w, http.StatusNotFound, "nothing found for that name")
+		return
+	}
+	if err != nil {
+		s.fail(w, r, err, "look up portrait")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "portrait found"})
 }

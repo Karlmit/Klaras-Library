@@ -319,3 +319,182 @@ func getJSON(ctx context.Context, u string, into any) error {
 	}
 	return json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(into)
 }
+
+// SetPortrait stores an image as an author's portrait, replacing any it had.
+//
+// Given to the store rather than written by the handler because the cache file
+// and the row that points at it have to agree: a file with no row is never
+// served, and a row with no file makes the grid ask for a picture that is not
+// there.
+func (s *Store) SetPortrait(ctx context.Context, cacheDir string, authorID int64, r io.Reader, source string) error {
+	dir := filepath.Join(cacheDir, "portraits")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(r, head)
+	head = head[:n]
+	ct := http.DetectContentType(head)
+	if !strings.HasPrefix(ct, "image/") {
+		return ErrNotAnImage
+	}
+
+	var name string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT name FROM authors WHERE id = $1`, authorID).Scan(&name); err != nil {
+		return err
+	}
+	sum := sha1.Sum([]byte(name))
+	// The name carries a counter so a replacement lands on a new URL: portraits
+	// are cached hard by the browser, and reusing the filename would leave the
+	// old face on screen until that cache expired.
+	var seq int64
+	_ = s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM author_portraits WHERE author_id = $1`, authorID).Scan(&seq)
+	file := fmt.Sprintf("%s-%d%s", hex.EncodeToString(sum[:]), time.Now().Unix()+seq, extForType(ct))
+
+	tmp, err := os.CreateTemp(dir, ".portrait-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(head); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := io.Copy(tmp, io.LimitReader(r, 8<<20)); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp.Name(), filepath.Join(dir, file)); err != nil {
+		return err
+	}
+
+	old := s.portraitFile(ctx, authorID)
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO author_portraits (author_id, filename, source, source_url, tried_at)
+		VALUES ($1,$2,$3,NULL,now())
+		ON CONFLICT (author_id) DO UPDATE
+		SET filename = EXCLUDED.filename, source = EXCLUDED.source,
+		    source_url = NULL, tried_at = now()`, authorID, file, source); err != nil {
+		return err
+	}
+	if old != "" && old != file {
+		_ = os.Remove(filepath.Join(dir, old))
+	}
+	return nil
+}
+
+// ClearPortrait removes an author's picture and records that they have none, so
+// the background sweep does not immediately put the old one back.
+func (s *Store) ClearPortrait(ctx context.Context, cacheDir string, authorID int64) error {
+	old := s.portraitFile(ctx, authorID)
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO author_portraits (author_id, filename, source, source_url, tried_at)
+		VALUES ($1, NULL, 'cleared by hand', NULL, now())
+		ON CONFLICT (author_id) DO UPDATE
+		SET filename = NULL, source = 'cleared by hand', source_url = NULL, tried_at = now()`,
+		authorID); err != nil {
+		return err
+	}
+	if old != "" {
+		_ = os.Remove(filepath.Join(cacheDir, "portraits", old))
+	}
+	return nil
+}
+
+// LookUpPortrait forgets what is known about an author and searches again, for
+// when the sweep found nothing and a name has since been corrected.
+func (s *Store) LookUpPortrait(ctx context.Context, cacheDir string, authorID int64) error {
+	var name string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT name FROM authors WHERE id = $1`, authorID).Scan(&name); err != nil {
+		return err
+	}
+	dir := filepath.Join(cacheDir, "portraits")
+	file, src, srcURL, err := fetchPortrait(ctx, dir, name)
+	if err != nil && !errors.Is(err, ErrNoPortrait) {
+		return err
+	}
+	var store *string
+	if file != "" {
+		store = &file
+	}
+	old := s.portraitFile(ctx, authorID)
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO author_portraits (author_id, filename, source, source_url, tried_at)
+		VALUES ($1,$2,$3,$4,now())
+		ON CONFLICT (author_id) DO UPDATE
+		SET filename = EXCLUDED.filename, source = EXCLUDED.source,
+		    source_url = EXCLUDED.source_url, tried_at = now()`,
+		authorID, store, src, srcURL); err != nil {
+		return err
+	}
+	if old != "" && old != file {
+		_ = os.Remove(filepath.Join(dir, old))
+	}
+	if file == "" {
+		return ErrNoPortrait
+	}
+	return nil
+}
+
+func (s *Store) portraitFile(ctx context.Context, authorID int64) string {
+	var f *string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT filename FROM author_portraits WHERE author_id = $1`, authorID).Scan(&f); err != nil {
+		return ""
+	}
+	if f == nil {
+		return ""
+	}
+	return *f
+}
+
+// ErrNotAnImage is returned when uploaded bytes are not a picture.
+var ErrNotAnImage = errors.New("not an image")
+
+// AuthorDetail is one author's own page.
+type AuthorDetail struct {
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	Sort          string `json:"sort"`
+	Books         int    `json:"books"`
+	HasPortrait   bool   `json:"has_portrait"`
+	PortraitFrom  string `json:"portrait_from,omitempty"`
+	PortraitTried bool   `json:"portrait_tried"`
+}
+
+// Author reads one author, with where their picture came from.
+func (s *Store) Author(ctx context.Context, id int64) (*AuthorDetail, error) {
+	var a AuthorDetail
+	var src *string
+	var filename *string
+	var tried *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT a.id, a.name, COALESCE(a.sort, a.name),
+		       (SELECT count(*)::int FROM book_authors ba
+		         JOIN books b ON b.id = ba.book_id AND NOT b.adult
+		        WHERE ba.author_id = a.id),
+		       ap.filename, ap.source, ap.tried_at
+		FROM authors a
+		LEFT JOIN author_portraits ap ON ap.author_id = a.id
+		WHERE a.id = $1`, id).
+		Scan(&a.ID, &a.Name, &a.Sort, &a.Books, &filename, &src, &tried)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	a.HasPortrait = filename != nil
+	if src != nil {
+		a.PortraitFrom = *src
+	}
+	a.PortraitTried = tried != nil
+	return &a, nil
+}
