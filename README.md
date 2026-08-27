@@ -49,8 +49,10 @@ critical query starts sequentially scanning `books`.
   crash cannot leave the database and the disk disagreeing.
 - **Watch folder** — drop files in and they are imported, filed and converted.
 - **Metadata lookup** — Apple Books, Google Books and Open Library, searched together. Results open
-  as a field-by-field checklist showing what you have beside what was found, cover
-  included. Fields are ticked by default only where the book has nothing, so a wrong
+  as a field-by-field checklist. Each found value sits in an editable field with what
+  the book holds today as a caption beneath it, so a value can be corrected before it
+  is taken. The cover is shown new beside current, both with their real pixel
+  dimensions. Fields are ticked by default only where the book has nothing, so a wrong
   edition cannot overwrite good metadata, and nothing but the cover is written until
   you press Save. The search terms are editable and a single source can be picked; a
   source that fails says so rather than looking like no match.

@@ -50,6 +50,9 @@ export interface Book extends BookListItem {
   files: BookFile[]
   identifiers: { scheme: string; value: string }[]
   review_reasons?: string[]
+  /** Real dimensions of the cover file, not of the thumbnail the grid serves. */
+  cover_w?: number
+  cover_h?: number
   updated_at: string
   shelves?: ShelfRef[]
 }

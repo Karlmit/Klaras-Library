@@ -26,22 +26,26 @@ type Identifier struct {
 
 // Book is the full detail view.
 type Book struct {
-	ID            int64        `json:"id"`
-	UUID          string       `json:"uuid"`
-	Title         string       `json:"title"`
-	TitleSort     string       `json:"title_sort"`
-	Authors       []string     `json:"authors"`
-	AuthorSort    string       `json:"author_sort"`
-	Description   *string      `json:"description,omitempty"`
-	Series        *string      `json:"series,omitempty"`
-	SeriesIndex   *float64     `json:"series_index,omitempty"`
-	Publisher     *string      `json:"publisher,omitempty"`
-	PubDate       *string      `json:"pubdate,omitempty"`
-	Rating        *int16       `json:"rating,omitempty"`
-	Tags          []string     `json:"tags"`
-	Languages     []string     `json:"languages"`
-	Path          string       `json:"path"`
-	HasCover      bool         `json:"has_cover"`
+	ID          int64    `json:"id"`
+	UUID        string   `json:"uuid"`
+	Title       string   `json:"title"`
+	TitleSort   string   `json:"title_sort"`
+	Authors     []string `json:"authors"`
+	AuthorSort  string   `json:"author_sort"`
+	Description *string  `json:"description,omitempty"`
+	Series      *string  `json:"series,omitempty"`
+	SeriesIndex *float64 `json:"series_index,omitempty"`
+	Publisher   *string  `json:"publisher,omitempty"`
+	PubDate     *string  `json:"pubdate,omitempty"`
+	Rating      *int16   `json:"rating,omitempty"`
+	Tags        []string `json:"tags"`
+	Languages   []string `json:"languages"`
+	Path        string   `json:"path"`
+	HasCover    bool     `json:"has_cover"`
+	// CoverW/CoverH are the real dimensions of the file on disk, filled in by
+	// the handler. Zero when there is no cover or it could not be read.
+	CoverW        int          `json:"cover_w,omitempty"`
+	CoverH        int          `json:"cover_h,omitempty"`
 	Files         []BookFile   `json:"files"`
 	Identifiers   []Identifier `json:"identifiers"`
 	NeedsReview   bool         `json:"needs_review"`

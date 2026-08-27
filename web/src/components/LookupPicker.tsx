@@ -74,7 +74,15 @@ export function LookupPicker({
   const [picked, setPicked] = useState<Set<FieldKey>>(
     () => new Set(rows.filter((r) => r.fill).map((r) => r.key)),
   )
+  // The found value is a starting point, not a verdict. A provider will hand
+  // back a title with the series glued on or a publisher in the wrong case,
+  // and correcting it here beats taking it and fixing it afterwards.
+  const [values, setValues] = useState<Record<string, string>>(
+    () => Object.fromEntries(rows.map((r) => [r.key, r.found])),
+  )
+  const [cover, setCover] = useState(result.cover_url ?? '')
   const [takeCover, setTakeCover] = useState(!book.has_cover && !!result.cover_url)
+  const [dims, setDims] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -85,23 +93,44 @@ export function LookupPicker({
       return n
     })
 
+  const hasCoverRow = !!result.cover_url
+  const total = rows.length + (hasCoverRow ? 1 : 0)
+  const count = picked.size + (takeCover ? 1 : 0)
+  const allOn = count === total && total > 0
+
+  const toggleAll = () => {
+    const on = !allOn
+    setPicked(on ? new Set(rows.map((r) => r.key)) : new Set())
+    if (hasCoverRow) setTakeCover(on)
+  }
+
+  const measure = (which: string) => (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const i = e.currentTarget
+    setDims((d) => ({ ...d, [which]: `${i.naturalWidth}×${i.naturalHeight}px` }))
+  }
+
+
+  const list = (v: string) =>
+    v.split(',').map((x) => x.trim()).filter(Boolean)
+
   const apply = async () => {
     setBusy(true)
     setError('')
     try {
-      if (takeCover && result.cover_url) {
-        await booksApi.fetchCover(bookId, result.cover_url)
+      if (takeCover && cover.trim()) {
+        await booksApi.fetchCover(bookId, cover.trim())
       }
       const patch: Partial<BookEdit> = {}
       for (const r of rows) {
         if (!picked.has(r.key)) continue
-        if (r.key === 'authors') patch.authors = result.authors
-        else if (r.key === 'tags') patch.tags = result.tags
-        else if (r.key === 'pubdate') patch.pubdate = normaliseDate(result.pubdate)
-        else if (r.key === 'title') patch.title = result.title
-        else if (r.key === 'series') patch.series = result.series
-        else if (r.key === 'publisher') patch.publisher = result.publisher
-        else if (r.key === 'description') patch.description = result.description
+        const v = (values[r.key] ?? '').trim()
+        if (r.key === 'authors') patch.authors = list(v)
+        else if (r.key === 'tags') patch.tags = list(v)
+        else if (r.key === 'pubdate') patch.pubdate = normaliseDate(v) ?? v
+        else if (r.key === 'title') patch.title = v
+        else if (r.key === 'series') patch.series = v
+        else if (r.key === 'publisher') patch.publisher = v
+        else if (r.key === 'description') patch.description = v
       }
       onApply(patch)
     } catch (e) {
@@ -110,8 +139,6 @@ export function LookupPicker({
       setBusy(false)
     }
   }
-
-  const count = picked.size + (takeCover ? 1 : 0)
 
   return (
     <div className="pick">
@@ -122,41 +149,82 @@ export function LookupPicker({
 
       {error && <div className="error">{error}</div>}
 
-      <p className="hint" style={{ marginTop: 0 }}>
-        Ticked by default where the book has nothing. Anything that would replace what is
-        already there starts unticked.
-      </p>
+      <label className="pick__all">
+        <input type="checkbox" checked={allOn} onChange={toggleAll} />
+        <span>Select all</span>
+        <span className="hint">
+          Ticked already where the book has nothing; anything that would replace what is
+          there starts unticked.
+        </span>
+      </label>
 
-      {result.cover_url && (
-        <label className={`pick__row pick__row--cover ${takeCover ? 'pick__row--on' : ''}`}>
-          <input type="checkbox" checked={takeCover} onChange={() => setTakeCover((v) => !v)} />
-          <span className="pick__label">Cover</span>
+      {hasCoverRow && (
+        <div className={`pick__row pick__row--cover ${takeCover ? 'pick__row--on' : ''}`}>
+          <input
+            type="checkbox"
+            checked={takeCover}
+            aria-label="Replace the cover"
+            onChange={() => setTakeCover((v) => !v)}
+          />
+          <div className="pick__body">
+            <span className="pick__label">Cover</span>
+            <input
+              className="pick__input"
+              value={cover}
+              onChange={(e) => setCover(e.target.value)}
+              spellCheck={false}
+            />
+          </div>
           <div className="pick__covers">
             <figure>
-              {book.has_cover
-                ? <img src={coverUrl(bookId, 'grid')} alt="" />
+              <figcaption>New</figcaption>
+              {cover.trim()
+                ? <img src={remoteImage(cover.trim())} alt="" onLoad={measure('new')} />
                 : <div className="pick__nocover">none</div>}
-              <figcaption>now</figcaption>
+              <span>{dims.new}</span>
             </figure>
-            <span className="pick__arrow" aria-hidden="true">→</span>
             <figure>
-              <img src={remoteImage(result.cover_url)} alt="" />
-              <figcaption>found</figcaption>
+              <figcaption>Current</figcaption>
+              {book.has_cover
+                ? <img src={coverUrl(bookId, 'grid', book.updated_at)} alt="" />
+                : <div className="pick__nocover">none</div>}
+              {/* The file's own size, not the thumbnail's: this number is here
+                  to be compared against the candidate's. */}
+              <span>{book.cover_w ? `${book.cover_w}×${book.cover_h}px` : ''}</span>
             </figure>
           </div>
-        </label>
+        </div>
       )}
 
       {rows.map((r) => (
-        <label key={r.key} className={`pick__row ${picked.has(r.key) ? 'pick__row--on' : ''}`}>
-          <input type="checkbox" checked={picked.has(r.key)} onChange={() => toggle(r.key)} />
-          <span className="pick__label">{r.label}</span>
-          <div className="pick__vals">
-            <span className="pick__now">{r.current || <em>empty</em>}</span>
-            <span className="pick__arrow" aria-hidden="true">→</span>
-            <span className="pick__new">{r.found}</span>
+        <div key={r.key} className={`pick__row ${picked.has(r.key) ? 'pick__row--on' : ''}`}>
+          <input
+            type="checkbox"
+            checked={picked.has(r.key)}
+            aria-label={r.label}
+            onChange={() => toggle(r.key)}
+          />
+          <div className="pick__body">
+            <span className="pick__label">{r.label}</span>
+            {r.key === 'description' ? (
+              <textarea
+                className="pick__input pick__input--long"
+                rows={5}
+                value={values[r.key] ?? ''}
+                onChange={(e) => setValues((v) => ({ ...v, [r.key]: e.target.value }))}
+              />
+            ) : (
+              <input
+                className="pick__input"
+                value={values[r.key] ?? ''}
+                onChange={(e) => setValues((v) => ({ ...v, [r.key]: e.target.value }))}
+              />
+            )}
+            <span className="pick__was">
+              {r.current ? `Currently: ${r.current}` : 'Currently: nothing'}
+            </span>
           </div>
-        </label>
+        </div>
       ))}
 
       <div className="pick__foot">
@@ -178,3 +246,4 @@ export function LookupPicker({
     </div>
   )
 }
+

@@ -254,3 +254,23 @@ func Placeholder(w io.Writer, width int) error {
 
 // colorV100 is --v-100 from web/src/styles/tokens.css (#E9DCF7).
 var colorV100 = color.NRGBA{R: 0xE9, G: 0xDC, B: 0xF7, A: 0xFF}
+
+// SourceSize reports the pixel dimensions of a book's own cover file.
+//
+// DecodeConfig reads the header and stops, so this costs a few kilobytes
+// rather than decoding the whole image. It exists so a cover being offered can
+// be compared against the one already held: showing the thumbnail's dimensions
+// there would say 200x267 for every book in the library and make a smaller
+// replacement look like an upgrade.
+func (s *Service) SourceSize(bookPath string) (w, h int, ok bool) {
+	f, err := os.Open(s.SourcePath(bookPath))
+	if err != nil {
+		return 0, 0, false
+	}
+	defer f.Close()
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return 0, 0, false
+	}
+	return cfg.Width, cfg.Height, true
+}

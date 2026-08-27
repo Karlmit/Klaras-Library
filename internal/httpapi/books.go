@@ -90,6 +90,13 @@ func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err, "get book")
 		return
 	}
+	// Read from the cover itself: what the grid serves is a 200px thumbnail, and
+	// quoting its size when comparing against a candidate would be misleading.
+	if b.HasCover {
+		if cw, ch, ok := s.covers.SourceSize(b.Path); ok {
+			b.CoverW, b.CoverH = cw, ch
+		}
+	}
 	writeJSON(w, http.StatusOK, b)
 }
 
