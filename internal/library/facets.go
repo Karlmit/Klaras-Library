@@ -15,15 +15,20 @@ type Facet struct {
 
 // Facets is the sidebar payload.
 type Facets struct {
-	Authors     []Facet `json:"authors"`
-	Tags        []Facet `json:"tags"`
-	Languages   []Facet `json:"languages"`
-	Series      []Facet `json:"series"`
-	Formats     []Facet `json:"formats"`
-	TotalBooks  int64   `json:"total_books"`
-	NeedsReview int64   `json:"needs_review"`
-	Adult       int64   `json:"adult"`
-	RefreshedAt string  `json:"refreshed_at,omitempty"`
+	Authors    []Facet `json:"authors"`
+	Tags       []Facet `json:"tags"`
+	Languages  []Facet `json:"languages"`
+	Series     []Facet `json:"series"`
+	Formats    []Facet `json:"formats"`
+	TotalBooks int64   `json:"total_books"`
+	// Totals for the Browse buttons, which stand in for the lists that used to
+	// be here. Counted rather than taken from the facet slice: that slice is
+	// the top N, so its length is the page size, not the number of authors.
+	AuthorsTotal int64  `json:"authors_total"`
+	SeriesTotal  int64  `json:"series_total"`
+	NeedsReview  int64  `json:"needs_review"`
+	Adult        int64  `json:"adult"`
+	RefreshedAt  string `json:"refreshed_at,omitempty"`
 }
 
 // Facets reads the materialised sidebar counts.
@@ -32,7 +37,10 @@ type Facets struct {
 // spend most of its budget counting things that barely change. Reading the
 // materialised view is a sub-millisecond index scan instead.
 func (s *Store) Facets(ctx context.Context, limit int) (*Facets, error) {
-	if limit < 1 || limit > 500 {
+	// The ceiling has to clear the whole category list: tidying them up means
+	// seeing all 1,113, and silently returning the top 50 instead would look
+	// like the rest had already been merged.
+	if limit < 1 || limit > 5000 {
 		limit = 50
 	}
 	out := &Facets{
@@ -78,6 +86,10 @@ func (s *Store) Facets(ctx context.Context, limit int) (*Facets, error) {
 				out.NeedsReview = n
 			case "adult":
 				out.Adult = n
+			case "authors":
+				out.AuthorsTotal = n
+			case "series":
+				out.SeriesTotal = n
 			}
 		}
 	}

@@ -12,6 +12,10 @@ interface Props {
    *  no room for these and the search field needs the whole width. */
   account?: { username: string; onSettings: () => void; onSignOut: () => void }
   onDiscover?: () => void
+  onAuthors: () => void
+  onSeries: () => void
+  /** Editors only: merging categories changes the library. */
+  onCategories?: () => void
 }
 
 /**
@@ -21,8 +25,11 @@ interface Props {
  * live they cost ~22ms each, and there are five of them, so a page load would
  * spend most of its budget counting things that barely change.
  */
-export function Sidebar({ query, onChange, isAdmin, open = false, account, onDiscover }: Props) {
-  const { data } = useQuery({ queryKey: ['facets'], queryFn: api.facets, staleTime: 60_000 })
+export function Sidebar({
+  query, onChange, isAdmin, open = false, account, onDiscover,
+  onAuthors, onSeries, onCategories,
+}: Props) {
+  const { data } = useQuery({ queryKey: ['facets'], queryFn: () => api.facets(), staleTime: 60_000 })
   const { data: shelves } = useQuery({ queryKey: ['shelves'], queryFn: shelvesApi.list })
 
   const clearAll = () =>
@@ -111,35 +118,31 @@ export function Sidebar({ query, onChange, isAdmin, open = false, account, onDis
         </>
       )}
 
-      <FacetGroup
-        title="Authors"
-        items={data?.authors}
-        active={query.author}
-        onPick={(v) => onChange({ author: v === query.author ? undefined : v })}
-      />
+      {/* Authors and Series are pages, not lists. Ten thousand authors will
+          never fit in a sidebar, and the fifteen that did were the fifteen
+          with the most books rather than the one being looked for. */}
+      <div className="navhead">Browse</div>
+      <button className="navitem" onClick={onAuthors}>
+        <span className="navitem__label">Authors</span>
+        <span className="navitem__count">{data?.authors_total?.toLocaleString('sv-SE') ?? ''}</span>
+      </button>
+      <button className="navitem" onClick={onSeries}>
+        <span className="navitem__label">Series</span>
+        <span className="navitem__count">{data?.series_total?.toLocaleString('sv-SE') ?? ''}</span>
+      </button>
+
       <FacetGroup
         title="Categories"
         items={data?.tags}
         active={query.tag}
         onPick={(v) => onChange({ tag: v === query.tag ? undefined : v })}
-      />
-      <FacetGroup
-        title="Series"
-        items={data?.series}
-        active={query.series}
-        onPick={(v) => onChange({ series: v === query.series ? undefined : v })}
+        action={onCategories && { label: 'Tidy', onClick: onCategories }}
       />
       <FacetGroup
         title="Languages"
         items={data?.languages}
         active={query.language}
         onPick={(v) => onChange({ language: v === query.language ? undefined : v })}
-      />
-      <FacetGroup
-        title="Formats"
-        items={data?.formats}
-        active={query.format}
-        onPick={(v) => onChange({ format: v === query.format ? undefined : v })}
       />
       {account && (
         <div className="sidebar__account">
@@ -162,12 +165,14 @@ function FacetGroup({
   active,
   onPick,
   limit = 15,
+  action,
 }: {
   title: string
   items?: { value: string; count: number }[]
   active?: string
   onPick: (v: string) => void
   limit?: number
+  action?: { label: string; onClick: () => void } | false
 }) {
   if (!items?.length) return null
   // Keep the active value visible even if it falls outside the top slice.
@@ -178,7 +183,14 @@ function FacetGroup({
   }
   return (
     <>
-      <div className="navhead">{title}</div>
+      <div className="navhead">
+        {title}
+        {action && (
+          <button className="navhead__action" onClick={action.onClick}>
+            {action.label}
+          </button>
+        )}
+      </div>
       {shown.map((f) => (
         <button
           key={f.value}

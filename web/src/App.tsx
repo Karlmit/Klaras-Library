@@ -9,6 +9,15 @@ import { EditPanel } from './components/EditPanel'
 const Discover = lazy(() =>
   import('./components/Discover').then((m) => ({ default: m.Discover })),
 )
+const AuthorsView = lazy(() =>
+  import('./components/AuthorsView').then((m) => ({ default: m.AuthorsView })),
+)
+const SeriesView = lazy(() =>
+  import('./components/SeriesView').then((m) => ({ default: m.SeriesView })),
+)
+const CategoryMerge = lazy(() =>
+  import('./components/CategoryMerge').then((m) => ({ default: m.CategoryMerge })),
+)
 const Reader = lazy(() =>
   import('./components/Reader').then((m) => ({ default: m.Reader })),
 )
@@ -46,6 +55,11 @@ export function App() {
   // Back closes whatever is open instead of leaving the site.
   const [discoverOpen, setDiscoverOpen] = useState(false)
   const closeDiscover = useCallback(() => setDiscoverOpen(false), [])
+  // Browse pages replace the grid rather than floating over it: picking an
+  // author is navigation, and it should leave you looking at their books.
+  const [browse, setBrowse] = useState<'authors' | 'series' | null>(null)
+  const closeBrowse = useCallback(() => setBrowse(null), [])
+  const [tidyTags, setTidyTags] = useState(false)
   const [navOpen, setNavOpen] = useState(false)
   const closeNav = useCallback(() => setNavOpen(false), [])
   const closeSettings = useCallback(() => setSettingsOpen(false), [])
@@ -62,6 +76,7 @@ export function App() {
   // leaving the site -- the first thing a thumb reaches for on a phone.
   useOverlayHistory(navOpen, closeNav)
   useOverlayHistory(discoverOpen, closeDiscover)
+  useOverlayHistory(browse !== null, closeBrowse)
 
   const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ['status'],
@@ -276,6 +291,9 @@ export function App() {
         isAdmin={user.role === 'admin'}
         open={navOpen}
         onDiscover={() => { closeNav(); setDiscoverOpen(true) }}
+        onAuthors={() => { closeNav(); setBrowse('authors') }}
+        onSeries={() => { closeNav(); setBrowse('series') }}
+        onCategories={user.role !== 'reader' ? () => { closeNav(); setTidyTags(true) } : undefined}
         account={{
           username: user.username,
           onSettings: () => { closeNav(); setSettingsOpen(true) },
@@ -369,6 +387,41 @@ export function App() {
       {editing != null && <EditPanel bookId={editing} onClose={closeEdit} />}
 
       {uploadOpen && <Upload onClose={closeUpload} />}
+
+      {browse && (
+        <div className="sheet" role="dialog" aria-label={browse === 'authors' ? 'Authors' : 'Series'}>
+          <div className="sheet__head">
+            <button className="btn btn--sm btn--ghost" onClick={closeBrowse}>← Back to library</button>
+          </div>
+          <Suspense fallback={<p className="browse__empty">Loading…</p>}>
+            {browse === 'authors' ? (
+              <AuthorsView
+                onPick={(name) => {
+                  closeBrowse()
+                  patchQuery({ author: name, tag: undefined, series: undefined,
+                               language: undefined, format: undefined, needs_review: false,
+                               adult: undefined, shelf: undefined, q: undefined })
+                }}
+              />
+            ) : (
+              <SeriesView
+                onPick={(name) => {
+                  closeBrowse()
+                  patchQuery({ series: name, author: undefined, tag: undefined,
+                               language: undefined, format: undefined, needs_review: false,
+                               adult: undefined, shelf: undefined, q: undefined })
+                }}
+              />
+            )}
+          </Suspense>
+        </div>
+      )}
+
+      {tidyTags && (
+        <Suspense fallback={null}>
+          <CategoryMerge onClose={() => setTidyTags(false)} />
+        </Suspense>
+      )}
 
       {discoverOpen && (
         <div className="sheet" role="dialog" aria-label="Random book">

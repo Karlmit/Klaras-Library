@@ -234,6 +234,13 @@ func cmdServe() error {
 		go lib.RunDescriptionFetcher(ctx, cfg.LibraryRoot, set, cfg.DescriptionsPerDay, log)
 	}
 
+	// Author portraits fill in the same way: a slow sweep against Wikidata,
+	// most-published authors first. It has to be a background job rather than
+	// something the authors page triggers -- ten thousand cards asking for a
+	// picture as they scroll past would be thousands of requests to a free
+	// service for one screen of browsing.
+	go lib.RunPortraitFetcher(ctx, cfg.CacheDir, log)
+
 	// Prune expired lockout entries, so a long guessing run against random
 	// usernames cannot grow the limiter's map without bound.
 	stopSweeper := make(chan struct{})

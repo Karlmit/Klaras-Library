@@ -69,6 +69,9 @@ export interface Facets {
   series: Facet[]
   formats: Facet[]
   total_books: number
+  /** Every author and series in the library, not just the ones in the slice above. */
+  authors_total: number
+  series_total: number
   needs_review: number
   adult: number
   refreshed_at?: string
@@ -167,7 +170,8 @@ export const api = {
 
   books: (qy: BookQuery) => req<BookPage>(`/api/books?${bookQueryString(qy)}`),
   book: (id: number) => req<Book>(`/api/books/${id}`),
-  facets: () => req<Facets>('/api/facets'),
+  facets: (limit?: number) =>
+    req<Facets>(`/api/facets${limit ? `?limit=${limit}` : ''}`),
   suggest: (q: string) =>
     req<{ suggestions: { kind: string; value: string; id: number }[] }>(
       `/api/suggest?q=${encodeURIComponent(q)}`,
@@ -221,6 +225,35 @@ export interface BookEdit {
   needs_review?: boolean
   isbn?: string
 }
+
+export interface AuthorEntry {
+  id: number
+  name: string
+  sort: string
+  books: number
+  /** Whether a portrait has been found; the grid draws initials when not. */
+  has_portrait: boolean
+}
+
+export interface SeriesEntry {
+  id: number
+  name: string
+  books: number
+  covers: { id: number; cover_v: number }[]
+}
+
+export const browseApi = {
+  authors: () => req<{ authors: AuthorEntry[] }>('/api/authors'),
+  series: () => req<{ series: SeriesEntry[] }>('/api/series'),
+  mergeTags: (from: string[], to: string) =>
+    req<{ status: string; books: number }>(
+      `/api/tags/merge${to ? '' : '?delete=true'}`,
+      { method: 'POST', body: JSON.stringify({ from, to }) },
+    ),
+}
+
+/** An author's picture. 404 is ordinary — most authors have none. */
+export const portraitUrl = (id: number) => `/api/authors/${id}/portrait`
 
 export const shelvesApi = {
   list: () => req<{ shelves: Shelf[] }>('/api/shelves'),

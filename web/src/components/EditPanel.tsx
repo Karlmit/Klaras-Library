@@ -505,7 +505,7 @@ function Lookup({
           onChange={(e) => setTerms((t) => ({ ...(t ?? { title: '', author: '', isbn: '' }), isbn: e.target.value }))}
         />
         <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-          <option value="">Both sources</option>
+          <option value="">All sources</option>
           {(data?.providers ?? []).map((n) => (
             <option key={n} value={n}>
               {n} only

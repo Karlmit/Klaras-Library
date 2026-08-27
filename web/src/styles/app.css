@@ -1361,3 +1361,106 @@ select.sort {
     /* One field per row; two never fit legibly. */
     .eform__grid, .eform__grid--series { grid-template-columns: 1fr; }
 }
+
+/* ── Browse pages: authors and series ────────────────────────────────────
+   These replace the grid rather than floating over it, so they get the whole
+   width and their own toolbar. */
+.browse { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.browse__bar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 0 4px 12px;
+}
+.browse__bar h1 { margin: 0; font-size: 17px; font-weight: 600; }
+.browse__find {
+    height: 36px; padding: 0 10px; min-width: 0; flex: 1 1 14rem; max-width: 22rem;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    background: var(--surface); color: var(--text); font: inherit;
+}
+.browse__find:focus { border-color: var(--accent); outline: none; }
+.browse__min { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); }
+.browse__min select {
+    height: 36px; padding: 0 8px; border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit;
+}
+.browse__scroll { flex: 1; overflow-y: auto; min-height: 0; padding: 0 4px 24px; }
+.browse__empty { color: var(--text-muted); padding: 24px 4px; }
+.browse__row { display: grid; gap: 10px; align-content: start; }
+
+/* An author card. The face is circular so it never reads as a book cover, and
+   the initials plate is the normal state rather than the broken one. */
+.acard {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 10px 6px; border: 0; background: transparent; cursor: pointer;
+    border-radius: var(--radius-sm); text-align: center; min-width: 0;
+}
+.acard:hover { background: var(--v-50); }
+.acard__face {
+    width: 96px; height: 96px; border-radius: 50%;
+    display: grid; place-items: center; overflow: hidden;
+    box-shadow: 0 2px 8px -2px rgb(0 0 0 / 0.12);
+}
+.acard__face img { width: 100%; height: 100%; object-fit: cover; }
+.acard__initials {
+    font-size: 30px; font-weight: 600; letter-spacing: 0.02em;
+    color: var(--v-900);
+}
+.acard__name {
+    font-size: 12.5px; line-height: 1.3; max-width: 100%;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.acard__count { font-size: 11px; color: var(--text-muted); }
+
+/* A series card: the first few covers fanned, because a series is recognised
+   by its books rather than by its name. */
+.sgrid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+.scard {
+    display: flex; flex-direction: column; gap: 8px; padding: 8px;
+    border: 0; background: transparent; cursor: pointer;
+    border-radius: var(--radius-sm); text-align: left; min-width: 0;
+}
+.scard:hover { background: var(--v-50); }
+.scard__fan {
+    position: relative; display: block; width: 100%; aspect-ratio: 16 / 10;
+    border-radius: var(--radius-sm); overflow: hidden; background: var(--v-100);
+}
+.scard__fan img {
+    position: absolute; top: 0; height: 100%; width: auto; aspect-ratio: var(--cover-ratio);
+    object-fit: cover; box-shadow: -2px 0 6px -1px rgb(0 0 0 / 0.28);
+}
+.scard__nocovers {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    font-size: 12px; color: var(--text-muted);
+}
+.scard__count {
+    position: absolute; top: 6px; right: 6px; z-index: 10;
+    min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;
+    background: var(--accent); color: #fff;
+    font-size: 11px; font-weight: 600; display: grid; place-items: center;
+}
+.scard__name { font-size: 13px; line-height: 1.3; }
+
+/* Category tidy-up */
+.navhead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.navhead__action {
+    border: 0; background: transparent; cursor: pointer; padding: 0;
+    font: inherit; font-size: 11px; text-transform: none; letter-spacing: 0;
+    color: var(--v-600);
+}
+.navhead__action:hover { text-decoration: underline; }
+.tagpick { display: grid; gap: 2px; }
+.tagpick__item {
+    display: grid; grid-template-columns: 20px 1fr auto; gap: 10px; align-items: center;
+    padding: 6px 8px; margin: 0 -8px; border-radius: var(--radius-sm); cursor: pointer;
+}
+.tagpick__item:hover { background: var(--surface-sunken); }
+.tagpick__item--on { background: var(--v-50); }
+.tagpick__item input { width: 17px; height: 17px; accent-color: var(--accent); }
+.tagpick__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.tagpick__count { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.notice {
+    background: var(--v-50); border: 1px solid var(--v-200); color: var(--v-900);
+    padding: 8px 10px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 12px;
+}
