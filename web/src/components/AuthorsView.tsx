@@ -25,17 +25,34 @@ export function AuthorsView({ onPick }: { onPick: (id: number) => void }) {
     queryFn: browseApi.authors,
     staleTime: 5 * 60_000,
   })
+  const { data: sweep } = useQuery({
+    queryKey: ['portrait-status'],
+    queryFn: browseApi.portraitStatus,
+    // While the sweep is running the numbers move, so this refreshes rather
+    // than sitting on a figure from when the page opened.
+    refetchInterval: 30_000,
+  })
   const [q, setQ] = useState('')
   const [minBooks, setMinBooks] = useState(1)
+  // Most books first by default. Sorted by name, the first screen of a library
+  // like this is [Bymbp] and "© Kazuo Ishiguro 1955" -- one-book oddities from
+  // the import, which are also the last names the portrait sweep reaches. The
+  // authors worth looking at, and the ones with pictures, were all buried.
+  const [order, setOrder] = useState<'books' | 'name'>('books')
   const scroller = useRef<HTMLDivElement | null>(null)
 
   const authors = useMemo(() => {
     const all = data?.authors ?? []
     const needle = q.trim().toLowerCase()
-    return all.filter(
+    const list = all.filter(
       (a) => a.books >= minBooks && (!needle || a.name.toLowerCase().includes(needle)),
     )
-  }, [data, q, minBooks])
+    // The server already returns them in Swedish name order, so only the
+    // by-books ordering needs doing here.
+    return order === 'books'
+      ? [...list].sort((x, y) => y.books - x.books || x.sort.localeCompare(y.sort, 'sv'))
+      : list
+  }, [data, q, minBooks, order])
 
   // Card width drives how many fit per row; the virtualiser works in rows.
   const [perRow, setPerRow] = useState(6)
@@ -72,6 +89,13 @@ export function AuthorsView({ onPick }: { onPick: (id: number) => void }) {
           onChange={(e) => setQ(e.target.value)}
         />
         <label className="browse__min">
+          <span>Sort</span>
+          <select value={order} onChange={(e) => setOrder(e.target.value as 'books' | 'name')}>
+            <option value="books">Most books</option>
+            <option value="name">Name A–Ö</option>
+          </select>
+        </label>
+        <label className="browse__min">
           <span>At least</span>
           <select value={minBooks} onChange={(e) => setMinBooks(Number(e.target.value))}>
             <option value={1}>1 book</option>
@@ -81,6 +105,16 @@ export function AuthorsView({ onPick }: { onPick: (id: number) => void }) {
           </select>
         </label>
       </div>
+
+      {/* Answers "is this working?", which a wall of initials cannot. */}
+      {sweep && sweep.checked < sweep.authors && (
+        <p className="browse__sweep">
+          Looking up pictures on Wikidata: {sweep.checked.toLocaleString('sv-SE')} of{' '}
+          {sweep.authors.toLocaleString('sv-SE')} names checked,{' '}
+          {sweep.found.toLocaleString('sv-SE')} found. Most Swedish authors are not on
+          Wikidata at all — you can add a picture yourself on an author's page.
+        </p>
+      )}
 
       <div className="browse__scroll" ref={measure}>
         <div style={{ height: virt.getTotalSize(), position: 'relative' }}>

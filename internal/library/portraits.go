@@ -65,7 +65,10 @@ func (s *Store) PortraitPath(ctx context.Context, cacheDir string, authorID int6
 func (s *Store) RunPortraitFetcher(ctx context.Context, cacheDir string, log *slog.Logger) {
 	const (
 		settle = 2 * time.Minute
-		pace   = 3 * time.Second
+		// Two requests per name against a free service. Wikidata is not
+		// troubled by this rate and ten thousand authors at three seconds was
+		// most of a day before the first screen of the grid had faces.
+		pace = 1500 * time.Millisecond
 		// Long enough that a name added to Wikidata since is eventually
 		// found, short enough to be worth doing at all.
 		retryAfter = 90 * 24 * time.Hour
@@ -109,6 +112,11 @@ func (s *Store) RunPortraitFetcher(ctx context.Context, cacheDir string, log *sl
 			return
 		}
 
+		// A name rejected locally costs no request, so it should not cost the
+		// pause either -- otherwise the sweep spends three seconds each on
+		// imprints and placeholders it never even asked about.
+		skipped := notAPerson(name)
+
 		file, src, srcURL, ferr := fetchPortrait(ctx, dir, name)
 		if ferr != nil && !errors.Is(ferr, ErrNoPortrait) {
 			// A transport failure is not an answer. Leave no row, so this
@@ -139,6 +147,9 @@ func (s *Store) RunPortraitFetcher(ctx context.Context, cacheDir string, log *sl
 			log.Warn("recording portrait failed", "author", name, "err", err)
 		}
 
+		if skipped {
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -497,4 +508,35 @@ func (s *Store) Author(ctx context.Context, id int64) (*AuthorDetail, error) {
 	}
 	a.PortraitTried = tried != nil
 	return &a, nil
+}
+
+// PortraitProgress is how far the sweep has got.
+//
+// Visible in the interface because "is this working?" is otherwise
+// unanswerable: a wall of initials looks the same whether the sweep is running,
+// finished, or was never started.
+type PortraitProgress struct {
+	Authors int    `json:"authors"`
+	Checked int    `json:"checked"`
+	Found   int    `json:"found"`
+	LastAt  string `json:"last_at,omitempty"`
+}
+
+// PortraitStatus reports the sweep's progress.
+func (s *Store) PortraitStatus(ctx context.Context) (*PortraitProgress, error) {
+	var p PortraitProgress
+	var last *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT (SELECT count(DISTINCT ba.author_id)::int FROM book_authors ba),
+		       (SELECT count(*)::int FROM author_portraits),
+		       (SELECT count(*)::int FROM author_portraits WHERE filename IS NOT NULL),
+		       (SELECT max(tried_at) FROM author_portraits)`).
+		Scan(&p.Authors, &p.Checked, &p.Found, &last)
+	if err != nil {
+		return nil, err
+	}
+	if last != nil {
+		p.LastAt = last.UTC().Format(time.RFC3339)
+	}
+	return &p, nil
 }

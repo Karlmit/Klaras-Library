@@ -255,6 +255,10 @@ export interface AuthorDetail {
 export const browseApi = {
   authors: () => req<{ authors: AuthorEntry[] }>('/api/authors'),
   author: (id: number) => req<AuthorDetail>(`/api/authors/${id}`),
+  portraitStatus: () =>
+    req<{ authors: number; checked: number; found: number; last_at?: string }>(
+      '/api/authors-status',
+    ),
 
   setPortrait: (id: number, file: File) => {
     const form = new FormData()

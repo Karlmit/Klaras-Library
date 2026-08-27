@@ -21,6 +21,16 @@ func (s *Server) handleAuthors(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"authors": out})
 }
 
+// handlePortraitStatus reports how far the portrait sweep has got.
+func (s *Server) handlePortraitStatus(w http.ResponseWriter, r *http.Request) {
+	st, err := s.lib.PortraitStatus(r.Context())
+	if err != nil {
+		s.fail(w, r, err, "portrait status")
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
 // handleSeries lists every series with a book count and a few cover ids.
 func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 	out, err := s.lib.Series(r.Context())

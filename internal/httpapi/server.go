@@ -160,6 +160,7 @@ func (s *Server) routes() {
 				r.Get("/series", s.handleSeries)
 				r.Get("/authors/{id}/portrait", s.handleAuthorPortrait)
 				r.Get("/authors/{id}", s.handleAuthor)
+				r.Get("/authors-status", s.handlePortraitStatus)
 				r.Get("/discover", s.handleDiscoverDeck)
 				r.Post("/discover", s.handleDiscoverDecide)
 				r.Get("/kobo/tokens", s.handleListKoboTokens)
