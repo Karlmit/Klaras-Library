@@ -1542,3 +1542,13 @@ select.sort {
     border-radius: var(--radius-sm);
     font-size: 12.5px; color: var(--v-900);
 }
+
+/* A format that will be made on demand rather than one already on disk.
+   Deliberately quiet: the person downloading does not need to care, and it is
+   not an error state -- it is an outline and a mark, not a warning colour. */
+.btn--derived {
+    border-style: dashed;
+    color: var(--v-600);
+}
+.btn--derived:hover { border-style: solid; }
+.btn__spark { margin-right: 5px; font-size: 11px; opacity: 0.8; }

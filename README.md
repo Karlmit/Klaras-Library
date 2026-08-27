@@ -55,6 +55,10 @@ critical query starts sequentially scanning `books`.
   author cards with portraits where they exist and initials where they do not, and
   series shown as a fan of their own covers. An author has their own page, where a
   portrait can be uploaded, taken from an address, searched for again, or removed.
+- **KEPUB on demand** — books on a Kobo shelf are converted ahead of the device
+  asking. Any other book can still be downloaded as KEPUB: the server converts it
+  on the way out, in about a second. Its button is outlined rather than solid until
+  one exists, so it is visible at a glance what has been converted.
 - **Editing** — a book opens in a tabbed sheet: Details, Cover, Match, Files. Full
   screen on a phone, a centred dialog on a desktop.
 - **Tidying categories** — an import leaves the same category written several ways

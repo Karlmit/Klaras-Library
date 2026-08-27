@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/Karlmit/Klaras-Library/internal/library"
 )
 
 // handleDownloadBook streams a book file to a signed-in browser.
@@ -39,6 +41,15 @@ func (s *Server) handleDownloadBook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if filename == "" {
+		// A KEPUB is derivable rather than missing: kepubify makes one from the
+		// EPUB in about a second, and the result is cached under the source's
+		// hash, so asking for it is enough. Only books put on a Kobo shelf are
+		// converted ahead of time -- converting all 28,000 would be tens of
+		// gigabytes of files nobody reads.
+		if strings.EqualFold(format, "KEPUB") {
+			s.serveConvertedKepub(w, r, id, info)
+			return
+		}
 		writeErr(w, http.StatusNotFound, "this book has no "+format+" file")
 		return
 	}
@@ -84,4 +95,57 @@ func contentTypeFor(format string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// serveConvertedKepub makes a KEPUB from a book's EPUB and streams it.
+//
+// Synchronous on purpose. The conversion takes about a second, which is less
+// than the download that follows it, so waiting is simpler and truer than a
+// job plus a progress indicator plus somewhere to report that it failed.
+func (s *Server) serveConvertedKepub(
+	w http.ResponseWriter, r *http.Request, id int64, info *library.BookPathInfo,
+) {
+	var epub string
+	for _, f := range info.Files {
+		if strings.EqualFold(f.Format, "EPUB") {
+			epub = f.Name
+			break
+		}
+	}
+	if epub == "" {
+		writeErr(w, http.StatusNotFound, "this book has no EPUB to convert")
+		return
+	}
+
+	src, err := s.files.Abs(filepath.Join(info.Path, epub))
+	if err != nil {
+		s.log.Error("refusing unsafe download path", "book", id, "path", info.Path)
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	out, err := s.kepub.Convert(r.Context(), info.UUID, src)
+	if err != nil {
+		s.log.Warn("converting kepub for download", "book", id, "err", err)
+		writeErr(w, http.StatusInternalServerError, "this book could not be converted")
+		return
+	}
+
+	f, err := os.Open(out)
+	if err != nil {
+		s.fail(w, r, err, "open converted kepub")
+		return
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		s.fail(w, r, err, "stat converted kepub")
+		return
+	}
+
+	name := strings.TrimSuffix(epub, filepath.Ext(epub)) + ".kepub.epub"
+	w.Header().Set("Content-Type", contentTypeFor("KEPUB"))
+	w.Header().Set("Content-Disposition",
+		"attachment; filename*=UTF-8''"+url.PathEscape(name))
+	http.ServeContent(w, r, name, st.ModTime(), f)
 }

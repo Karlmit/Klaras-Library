@@ -44,6 +44,10 @@ type Book struct {
 	HasCover    bool     `json:"has_cover"`
 	// CoverW/CoverH are the real dimensions of the file on disk, filled in by
 	// the handler. Zero when there is no cover or it could not be read.
+	// KepubReady is set by the handler: a book converted for a Kobo shelf has
+	// its KEPUB in the cache rather than as a file of its own, so the file list
+	// alone cannot tell whether one exists.
+	KepubReady    bool         `json:"kepub_ready"`
 	CoverW        int          `json:"cover_w,omitempty"`
 	CoverH        int          `json:"cover_h,omitempty"`
 	Files         []BookFile   `json:"files"`

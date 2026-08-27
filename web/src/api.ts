@@ -53,6 +53,8 @@ export interface Book extends BookListItem {
   /** Real dimensions of the cover file, not of the thumbnail the grid serves. */
   cover_w?: number
   cover_h?: number
+  /** A KEPUB exists in the conversion cache even if it is not a file of its own. */
+  kepub_ready?: boolean
   updated_at: string
   shelves?: ShelfRef[]
 }

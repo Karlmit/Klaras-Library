@@ -150,6 +150,28 @@ export function BookDetail({ bookId, onClose, onFilter, onEdit, onRead, canEdit 
                       {f.format} · {formatBytes(f.size_bytes)}
                     </a>
                   ))}
+                  {/* A KEPUB that does not exist yet is still downloadable: the
+                      server converts it on the way out, in about a second. The
+                      marker is not a warning -- nothing is wrong and nothing
+                      needs doing -- it is just so it is visible which books
+                      have been converted and which have not. */}
+                  {needsKepub(book.files) && (
+                    <a
+                      className={`btn btn--ghost btn--sm ${book.kepub_ready ? '' : 'btn--derived'}`}
+                      style={{ marginRight: 6, marginBottom: 6 }}
+                      href={`/api/books/${book.id}/download/kepub`}
+                      title={
+                        book.kepub_ready
+                          ? 'Converted and cached, ready to download.'
+                          : 'Not converted yet. Downloading converts it first, which takes about a second.'
+                      }
+                    >
+                      {!book.kepub_ready && (
+                        <span className="btn__spark" aria-hidden="true">✦</span>
+                      )}
+                      KEPUB
+                    </a>
+                  )}
                 </div>
               </div>
             </div>
@@ -273,6 +295,13 @@ export function BookDetail({ bookId, onClose, onFilter, onEdit, onRead, canEdit 
 }
 
 /** epub.js can only render EPUB; KEPUB is an EPUB underneath but Kobo-specific. */
+/** True when a book has an EPUB to convert from and no KEPUB of its own. */
+function needsKepub(files: { format: string }[]): boolean {
+  return (
+    files.some((f) => f.format === 'EPUB') && !files.some((f) => f.format === 'KEPUB')
+  )
+}
+
 function readableFormat(files: { format: string }[]): string | undefined {
   return files.find((f) => f.format === 'EPUB')?.format
 }

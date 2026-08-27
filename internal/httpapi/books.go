@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -90,6 +91,18 @@ func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err, "get book")
 		return
 	}
+	// A KEPUB may exist in the conversion cache without being a file of the
+	// book's own -- that is what happens to everything on a Kobo shelf. Saying
+	// "not converted" for those would make the marker lie to the one person it
+	// is there for.
+	if hasFormat(b.Files, "EPUB") && !hasFormat(b.Files, "KEPUB") {
+		if src, err := s.files.Abs(filepath.Join(b.Path, formatFile(b.Files, "EPUB"))); err == nil {
+			if _, ok := s.kepub.Cached(b.UUID, src); ok {
+				b.KepubReady = true
+			}
+		}
+	}
+
 	// Read from the cover itself: what the grid serves is a 200px thumbnail, and
 	// quoting its size when comparing against a candidate would be misleading.
 	if b.HasCover {
@@ -118,4 +131,22 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"suggestions": out})
+}
+
+func hasFormat(files []library.BookFile, format string) bool {
+	for _, f := range files {
+		if strings.EqualFold(f.Format, format) {
+			return true
+		}
+	}
+	return false
+}
+
+func formatFile(files []library.BookFile, format string) string {
+	for _, f := range files {
+		if strings.EqualFold(f.Format, format) {
+			return f.Name
+		}
+	}
+	return ""
 }
