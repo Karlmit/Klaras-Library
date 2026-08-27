@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Karlmit/Klaras-Library/internal/kepub"
 	"github.com/Karlmit/Klaras-Library/internal/library"
 )
 
@@ -126,8 +128,24 @@ func (s *Server) serveConvertedKepub(
 
 	out, err := s.kepub.Convert(r.Context(), info.UUID, src)
 	if err != nil {
-		s.log.Warn("converting kepub for download", "book", id, "err", err)
-		writeErr(w, http.StatusInternalServerError, "this book could not be converted")
+		s.log.Warn("converting kepub for download", "book", id, "src", src, "err", err)
+		// Three different problems needing three different answers: a missing
+		// file is a library that has moved underneath us, a refusal is this
+		// particular book, and a cache failure is this server. One message for
+		// all three sends someone to look in the wrong place.
+		switch {
+		case errors.Is(err, kepub.ErrNoSource):
+			writeErr(w, http.StatusNotFound,
+				"the EPUB for this book is not on disk: "+epub)
+		case errors.Is(err, kepub.ErrCache):
+			writeErr(w, http.StatusInternalServerError,
+				"converted, but it could not be saved; check the cache volume is writable")
+		default:
+			// The reason is worth showing: this is an editors-only endpoint on
+			// a private server, and "it failed" is not something anyone can act on.
+			writeErr(w, http.StatusUnprocessableEntity,
+				"kepubify could not convert this EPUB: "+conversionReason(err))
+		}
 		return
 	}
 
@@ -148,4 +166,17 @@ func (s *Server) serveConvertedKepub(
 	w.Header().Set("Content-Disposition",
 		"attachment; filename*=UTF-8''"+url.PathEscape(name))
 	http.ServeContent(w, r, name, st.ModTime(), f)
+}
+
+// conversionReason trims the wrapper off a kepubify error so the message reads
+// as a sentence rather than as a stack of prefixes.
+func conversionReason(err error) string {
+	msg := err.Error()
+	if _, rest, found := strings.Cut(msg, ": "); found {
+		if _, tail, ok := strings.Cut(rest, ": "); ok {
+			return tail
+		}
+		return rest
+	}
+	return msg
 }

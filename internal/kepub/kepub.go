@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -41,8 +42,17 @@ func New(libraryRoot, cacheDir string) *Service {
 	}
 }
 
-// ErrNoSource means the EPUB is missing from disk.
-var ErrNoSource = errors.New("source epub not found")
+// The three ways converting fails, kept apart because they need three
+// different answers. "Could not be converted" covering all of them sends
+// someone looking at a book when the fault is a read-only cache volume.
+var (
+	// ErrNoSource: the EPUB is missing from disk, or is not a readable zip.
+	ErrNoSource = errors.New("source epub not found")
+	// ErrConvert: kepubify refused the book's own contents.
+	ErrConvert = errors.New("epub could not be converted")
+	// ErrCache: the conversion could not be written. A fault on this side.
+	ErrCache = errors.New("conversion cache not writable")
+)
 
 // cachePath keys the converted file on the source content hash, so an edited or
 // replaced EPUB automatically misses the cache instead of serving a stale
@@ -98,14 +108,14 @@ func (s *Service) Convert(ctx context.Context, uuid, srcPath string) (string, er
 		return out, nil // already converted
 	}
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrCache, err)
 	}
 
 	// Convert to a temporary file and rename into place, so a crash or a
 	// concurrent reader never sees a partially written book.
 	tmp, err := os.CreateTemp(filepath.Dir(out), ".tmp-*.kepub.epub")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrCache, err)
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
@@ -123,7 +133,17 @@ func (s *Service) Convert(ctx context.Context, uuid, srcPath string) (string, er
 
 	if err := s.conv.Convert(ctx, tmp, zr); err != nil {
 		tmp.Close()
-		return "", fmt.Errorf("kepubify %s: %w", filepath.Base(srcPath), err)
+		// Some of this library's EPUBs carry characters XML forbids -- one had
+		// two NUL bytes padding the end of its content.opf, after </package>,
+		// which every reader ignores and no XML parser will accept. Rather than
+		// declare the book unconvertible, strip them from a copy and try once
+		// more. The book on disk is never touched.
+		if out, n, ok := s.convertRepaired(ctx, uuid, srcPath, out); ok {
+			slog.Info("converted after removing illegal XML characters",
+				"book", filepath.Base(srcPath), "removed", n)
+			return out, nil
+		}
+		return "", fmt.Errorf("%w: %s: %v", ErrConvert, filepath.Base(srcPath), err)
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
@@ -133,7 +153,7 @@ func (s *Service) Convert(ctx context.Context, uuid, srcPath string) (string, er
 		return "", err
 	}
 	if err := os.Rename(tmpName, out); err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrCache, err)
 	}
 	return out, nil
 }
