@@ -3,11 +3,13 @@ package library_test
 import (
 	"archive/zip"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Karlmit/Klaras-Library/internal/library"
 	"github.com/Karlmit/Klaras-Library/internal/provider"
@@ -293,6 +295,93 @@ func seedBookWithISBN(t *testing.T, s *library.Store, title, isbn string) int64 
 	if _, err := s.Pool().Exec(ctx,
 		`INSERT INTO identifiers (book_id, scheme, value) VALUES ($1,'isbn',$2)`, id, isbn); err != nil {
 		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = s.Pool().Exec(context.Background(), `DELETE FROM books WHERE id=$1`, id) })
+	return id
+}
+
+// TestABacklogOfISBNlessBooksDoesNotStarveTheQueue is the guard for the bug
+// that stopped the nightly run dead.
+//
+// A book with no ISBN cannot be asked about, and the loop used to step over it
+// without recording anything -- so it stayed in the queue and came back the
+// next night, and the night after. Each one displaced a book that could have
+// been asked about, the residue at the head of the queue grew by exactly the
+// number skipped, and once it outgrew the window the pass asked about nothing
+// at all. Permanently, and silently: the settings screen still counted
+// thousands of reachable books waiting, and the run still reported success.
+//
+// The queue must reach past the backlog, and must keep reaching past it on the
+// second night as well -- a fix that only works once is not a fix.
+func TestABacklogOfISBNlessBooksDoesNotStarveTheQueue(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// More books with no ISBN than the window can hold, all newer than the two
+	// that can actually be looked up.
+	var backlog []int64
+	for i := 0; i < 40; i++ {
+		backlog = append(backlog,
+			seedAgedBook(t, s, fmt.Sprintf("Utan ISBN %d", i), "", time.Hour))
+	}
+	reachable := []int64{
+		seedAgedBook(t, s, "Ormen i Essex", "9789177955790", 48*time.Hour),
+		seedAgedBook(t, s, "Ormen i Essex", "9789177955791", 72*time.Hour),
+	}
+
+	// One a night, twice, the way the fetcher runs.
+	for night := 1; night <= 2; night++ {
+		set := provider.NewSetOf(&stubProvider{desc: blurb})
+		rep, err := s.FillFromGoogle(ctx, set, 1, false, log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rep.Asked != 1 || rep.FromGoogle != 1 {
+			t.Fatalf("night %d: asked %d, filled %d; want 1 and 1 -- the backlog "+
+				"of books with no ISBN is holding the window shut",
+				night, rep.Asked, rep.FromGoogle)
+		}
+	}
+
+	for _, id := range reachable {
+		if got := descOf(t, s, id); len(got) < 80 {
+			t.Errorf("book %d still has no description: %q", id, got)
+		}
+	}
+
+	// Nothing may be written down for a book that was never asked about; that
+	// verdict is permanent, and these books are still waiting on an ISBN.
+	var n int
+	if err := s.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM description_lookups
+		  WHERE source='google' AND book_id = ANY($1)`, backlog).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("recorded %d lookups for books that have no ISBN to look up", n)
+	}
+}
+
+// seedAgedBook inserts a book with no description at a chosen age, so a test
+// can control where it lands in the newest-first queue. An empty isbn leaves
+// the book with no identifier at all.
+func seedAgedBook(t *testing.T, s *library.Store, title, isbn string, age time.Duration) int64 {
+	t.Helper()
+	ctx := context.Background()
+	var id int64
+	if err := s.Pool().QueryRow(ctx, `
+		INSERT INTO books (uuid, title, path, description, added_at)
+		VALUES (gen_random_uuid(), $1, 'x/'||gen_random_uuid(), NULL, now() - $2::interval)
+		RETURNING id`, title, age.String()).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if isbn != "" {
+		if _, err := s.Pool().Exec(ctx,
+			`INSERT INTO identifiers (book_id, scheme, value) VALUES ($1,'isbn',$2)`,
+			id, isbn); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Cleanup(func() { _, _ = s.Pool().Exec(context.Background(), `DELETE FROM books WHERE id=$1`, id) })
 	return id

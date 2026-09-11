@@ -56,6 +56,21 @@ type DescriptionReport struct {
 	Elapsed     time.Duration
 }
 
+// hasISBN is the single definition of "the Google pass can act on this book".
+//
+// The candidate query and the counts on the settings screen have to agree. When
+// they drifted apart, the screen promised books the job would never ask about,
+// and the estimated nights remaining was a number with nothing behind it.
+//
+// An identifier row with an empty value is not an ISBN; without the btrim the
+// EXISTS would pass and the lookup would then be skipped for having no ISBN,
+// which is the same starvation by a smaller door.
+func hasISBN(alias string) string {
+	return `EXISTS (SELECT 1 FROM identifiers i
+	                 WHERE i.book_id = ` + alias + `.id AND i.scheme = 'isbn'
+	                   AND btrim(i.value) <> '')`
+}
+
 type descCandidate struct {
 	ID    int64
 	Title string
@@ -67,18 +82,31 @@ type descCandidate struct {
 // missingDescriptions lists books with no description, newest first so a
 // library that is still growing fills in the books someone just added before
 // the ones that have waited a year.
-func (s *Store) missingDescriptions(ctx context.Context, source string, limit int) ([]descCandidate, error) {
+//
+// requireISBN keeps books the caller cannot act on out of the window entirely.
+// Skipping them in the loop instead looks equivalent and is not: a skipped book
+// is never recorded as tried, so it comes back tomorrow, and the day after, and
+// forever. Every night it displaces one book that could have been asked about,
+// the residue at the head of the queue grows by exactly the number skipped, and
+// once it reaches the size of the window the pass asks about nothing at all --
+// permanently, with thousands of reachable books still waiting behind it.
+func (s *Store) missingDescriptions(ctx context.Context, source string, requireISBN bool, limit int) ([]descCandidate, error) {
+	isbnOnly := ""
+	if requireISBN {
+		isbnOnly = " AND " + hasISBN("b")
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT b.id, b.title, b.path,
 		       COALESCE(ARRAY(SELECT f.filename FROM book_files f
 		                       WHERE f.book_id = b.id AND f.format IN ('EPUB','KEPUB')
 		                       ORDER BY CASE f.format WHEN 'EPUB' THEN 0 ELSE 1 END), '{}'),
 		       COALESCE((SELECT i.value FROM identifiers i
-		                  WHERE i.book_id = b.id AND i.scheme = 'isbn' LIMIT 1), '')
+		                  WHERE i.book_id = b.id AND i.scheme = 'isbn'
+		                    AND btrim(i.value) <> '' LIMIT 1), '')
 		FROM books b
 		WHERE COALESCE(btrim(b.description), '') = ''
 		  AND NOT EXISTS (SELECT 1 FROM description_lookups d
-		                   WHERE d.book_id = b.id AND d.source = $1)
+		                   WHERE d.book_id = b.id AND d.source = $1)`+isbnOnly+`
 		ORDER BY b.added_at DESC, b.id DESC
 		LIMIT $2`, source, limit)
 	if err != nil {
@@ -117,11 +145,10 @@ func (s *Store) setDescription(ctx context.Context, id int64, text string) error
 func (s *Store) MissingDescriptionCount(ctx context.Context) (total, missing, withISBN int64, err error) {
 	err = s.pool.QueryRow(ctx, `
 		SELECT count(*),
-		       count(*) FILTER (WHERE COALESCE(btrim(description),'') = ''),
-		       count(*) FILTER (WHERE COALESCE(btrim(description),'') = ''
-		                          AND EXISTS (SELECT 1 FROM identifiers i
-		                                       WHERE i.book_id = books.id AND i.scheme='isbn'))
-		FROM books`).Scan(&total, &missing, &withISBN)
+		       count(*) FILTER (WHERE COALESCE(btrim(b.description),'') = ''),
+		       count(*) FILTER (WHERE COALESCE(btrim(b.description),'') = ''
+		                          AND `+hasISBN("b")+`)
+		FROM books b`).Scan(&total, &missing, &withISBN)
 	return
 }
 
@@ -130,7 +157,7 @@ func (s *Store) MissingDescriptionCount(ctx context.Context) (total, missing, wi
 func (s *Store) FillFromFiles(ctx context.Context, root string, limit int, dryRun bool, log *slog.Logger) (*DescriptionReport, error) {
 	start := time.Now()
 	rep := &DescriptionReport{}
-	books, err := s.missingDescriptions(ctx, "epub", limit)
+	books, err := s.missingDescriptions(ctx, "epub", false, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +196,10 @@ func (s *Store) FillFromFiles(ctx context.Context, root string, limit int, dryRu
 func (s *Store) FillFromGoogle(ctx context.Context, set *provider.Set, limit int, dryRun bool, log *slog.Logger) (*DescriptionReport, error) {
 	start := time.Now()
 	rep := &DescriptionReport{}
-	books, err := s.missingDescriptions(ctx, "google", limit*3)
+	// Every candidate now has an ISBN, so the window no longer has to be
+	// oversized to absorb books the loop would step over. The small margin
+	// covers the few rows a scattered 503 consumes without spending quota.
+	books, err := s.missingDescriptions(ctx, "google", true, limit+16)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +208,10 @@ func (s *Store) FillFromGoogle(ctx context.Context, set *provider.Set, limit int
 			break
 		}
 		if b.ISBN == "" {
-			continue // title matching attaches the wrong blurb too often
+			// The query already excludes these; matching on title and author
+			// instead attaches the wrong blurb too often to allow it as a
+			// fallback here.
+			continue
 		}
 		rep.Missing++
 		rep.Asked++
@@ -510,12 +543,11 @@ func (s *Store) DescriptionStatusFor(ctx context.Context) (*DescriptionStatus, e
 	var st DescriptionStatus
 	err := s.pool.QueryRow(ctx, `
 		SELECT count(*),
-		       count(*) FILTER (WHERE COALESCE(btrim(description),'') <> ''),
-		       count(*) FILTER (WHERE COALESCE(btrim(description),'') = ''),
-		       count(*) FILTER (WHERE COALESCE(btrim(description),'') = ''
-		                          AND EXISTS (SELECT 1 FROM identifiers i
-		                                       WHERE i.book_id = books.id AND i.scheme='isbn'))
-		FROM books`).Scan(&st.Total, &st.WithText, &st.Missing, &st.MissingWithISBN)
+		       count(*) FILTER (WHERE COALESCE(btrim(b.description),'') <> ''),
+		       count(*) FILTER (WHERE COALESCE(btrim(b.description),'') = ''),
+		       count(*) FILTER (WHERE COALESCE(btrim(b.description),'') = ''
+		                          AND `+hasISBN("b")+`)
+		FROM books b`).Scan(&st.Total, &st.WithText, &st.Missing, &st.MissingWithISBN)
 	if err != nil {
 		return nil, err
 	}
@@ -523,7 +555,7 @@ func (s *Store) DescriptionStatusFor(ctx context.Context) (*DescriptionStatus, e
 	err = s.pool.QueryRow(ctx, `
 		SELECT count(*) FROM books b
 		WHERE COALESCE(btrim(b.description),'') = ''
-		  AND EXISTS (SELECT 1 FROM identifiers i WHERE i.book_id=b.id AND i.scheme='isbn')
+		  AND `+hasISBN("b")+`
 		  AND NOT EXISTS (SELECT 1 FROM description_lookups d
 		                   WHERE d.book_id=b.id AND d.source='google')`).Scan(&st.Remaining)
 	if err != nil {
