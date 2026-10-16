@@ -672,6 +672,49 @@ func TestInitializationReturnsTheFullResourceTable(t *testing.T) {
 	}
 }
 
+// TestInitializationKeepsOverDrive guards a menu entry, not an endpoint.
+//
+// The device files every overdrive_* resource it receives into the [OverDrive]
+// section of its Kobo eReader.conf, and "More > Settings > OverDrive" exists
+// only while that section does. Leaving the keys out of our table does not mean
+// "we take no part in library borrowing" -- it means the next initialization
+// erases the section, and the entry disappears from the reader with nothing to
+// explain it. That is what happened to Klara's Clara after the move off
+// calibre-web: public library loans had been working and the menu was simply
+// gone.
+//
+// These point at OverDrive's own hosts. We are not in that conversation; we
+// only have to stop deleting it.
+func TestInitializationKeepsOverDrive(t *testing.T) {
+	f := newFixture(t, 1)
+
+	res, err := http.Get(f.srv.URL + "/kobo/" + f.token + "/v1/initialization")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+
+	var body struct {
+		Resources map[string]any `json:"Resources"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+
+	for k, want := range map[string]string{
+		"overdrive_account":             "https://auth.overdrive.com/account",
+		"overdrive_library":             "https://{libraryKey}.auth.overdrive.com/library",
+		"overdrive_library_finder_host": "https://libraryfinder.api.overdrive.com",
+		"overdrive_thunder_host":        "https://thunder.api.overdrive.com",
+	} {
+		got, _ := body.Resources[k].(string)
+		if got != want {
+			t.Errorf("resource %q = %q, want %q; the device drops the OverDrive "+
+				"menu when this is missing", k, got, want)
+		}
+	}
+}
+
 // decodeJSON reads a response body into v and closes it.
 func decodeJSON(t *testing.T, res *http.Response, v any) {
 	t.Helper()

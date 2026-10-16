@@ -345,6 +345,21 @@ both stay in step over the single header the device knows about. If Kobo is
 slow or unreachable, that round is skipped and only your library is served; the
 store position is not advanced, so nothing is lost.
 
+#### OverDrive
+
+The **More › Settings › OverDrive** entry on the device is not a store feature
+the device decides for itself — it exists only while the reader's
+`Kobo eReader.conf` has an `[OverDrive]` section, and the device rewrites that
+section from the resource table every server answers at `/v1/initialization`.
+A table without `overdrive_*` keys therefore deletes the menu entry rather than
+leaving it alone, which is how a reader that borrowed from a public library
+yesterday can have no OverDrive today.
+
+Those keys are now always sent, pointing at OverDrive's own hosts — the entry
+comes back on the device's next sync, with nothing to change on the reader.
+Borrowed books are separate: they arrive through Kobo's library sync, so they
+still need `KLARAS_KOBO_PROXY_STORE=true`.
+
 ### Reverse proxy
 
 **No special configuration is needed.** A plain proxy to the container is

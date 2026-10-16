@@ -12,7 +12,18 @@ package kobo
 //
 // Every entry therefore points at Kobo's own hosts, exactly as the device would
 // have had them, and only the three image keys are overridden to point here.
-// Mirrors calibre-web's NATIVE_KOBO_RESOURCES.
+//
+// Derived from calibre-web's NATIVE_KOBO_RESOURCES, plus the keys a real
+// /v1/initialization returns that calibre-web's copy has fallen behind on:
+// library_stack, purchase_buy, purchase_buy_templated and the four overdrive_*
+// entries.
+//
+// The overdrive_* ones are the same trap one level down. The device files them
+// into the [OverDrive] section of its Kobo eReader.conf, and "More > Settings >
+// OverDrive" exists only while that section does, so leaving them out does not
+// mean "we take no part in library borrowing" -- it deletes the menu entry from
+// the reader. They point at OverDrive's own hosts: we are not in that
+// conversation, we only have to stop erasing it.
 func nativeKoboResources() map[string]any {
 	return map[string]any{
 		"account_page":                  "https://www.kobo.com/account/settings",
@@ -106,6 +117,7 @@ func nativeKoboResources() map[string]any {
 		"library_metadata":                      "https://storeapi.kobo.com/v1/library/{Ids}/metadata",
 		"library_prices":                        "https://storeapi.kobo.com/v1/user/library/previews/prices",
 		"library_search":                        "https://storeapi.kobo.com/v1/library/search",
+		"library_stack":                         "https://storeapi.kobo.com/v1/user/library/stacks/{LibraryItemId}",
 		"library_sync":                          "https://storeapi.kobo.com/v1/library/sync",
 		"love_dashboard_page":                   "https://www.kobo.com/{region}/{language}/kobosuperpoints",
 		"love_points_redemption_page":           "https://www.kobo.com/{region}/{language}/KoboSuperPointsRedemption?productId={ProductId}",
@@ -114,6 +126,10 @@ func nativeKoboResources() map[string]any {
 		"notebooks":                             "https://storeapi.kobo.com/api/internal/notebooks",
 		"notifications_registration_issue":      "https://storeapi.kobo.com/v1/notifications/registration",
 		"oauth_host":                            "https://oauth.kobo.com",
+		"overdrive_account":                     "https://auth.overdrive.com/account",
+		"overdrive_library":                     "https://{libraryKey}.auth.overdrive.com/library",
+		"overdrive_library_finder_host":         "https://libraryfinder.api.overdrive.com",
+		"overdrive_thunder_host":                "https://thunder.api.overdrive.com",
 		"password_retrieval_page":               "https://www.kobo.com/passwordretrieval.html",
 		"personalizedrecommendations":           "https://storeapi.kobo.com/v2/users/personalizedrecommendations",
 		"pocket_link_account_start":             "https://authorize.kobo.com/{region}/{language}/linkpocket",
@@ -127,6 +143,8 @@ func nativeKoboResources() map[string]any {
 		"products":                              "https://storeapi.kobo.com/v1/products",
 		"productsv2":                            "https://storeapi.kobo.com/v2/products",
 		"provider_external_sign_in_page":        "https://authorize.kobo.com/ExternalSignIn/{providerName}?returnUrl=http://kobo.com/",
+		"purchase_buy":                          "https://www.kobo.com/checkout/createpurchase/",
+		"purchase_buy_templated":                "https://www.kobo.com/{culture}/checkout/createpurchase/{ProductId}",
 		"quickbuy_checkout":                     "https://storeapi.kobo.com/v1/store/quickbuy/{PurchaseId}/checkout",
 		"quickbuy_create":                       "https://storeapi.kobo.com/v1/store/quickbuy/purchase",
 		"rakuten_token_exchange":                "https://storeapi.kobo.com/v1/auth/rakuten_token_exchange",
