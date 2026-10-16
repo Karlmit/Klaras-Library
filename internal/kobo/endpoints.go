@@ -347,11 +347,21 @@ func (h *Handler) handleInitialization(w http.ResponseWriter, r *http.Request) {
 
 	// When proxying, prefer the live table so it tracks whatever Kobo changes,
 	// falling back to ours if the store is slow or unreachable.
+	//
+	// Falling back is not equivalent. Ours is a snapshot: it carries what Kobo
+	// sent when it was copied, so a device running on it is one firmware behind
+	// on anything keyed by a resource name -- which on a Kobo means whole menu
+	// entries, not just endpoints. That is worth a line in the log, because the
+	// symptom shows up days later on the device and never on the server.
 	if h.proxyStore {
 		if live := h.fetchStoreResources(r); live != nil {
 			for k, v := range live {
 				res[k] = v
 			}
+		} else {
+			h.log.Warn("KLARAS_KOBO_PROXY_STORE is on but Kobo's live resource " +
+				"table could not be read; sending the built-in snapshot instead, " +
+				"which may be missing resources this firmware expects")
 		}
 	}
 
@@ -396,10 +406,16 @@ func (h *Handler) fetchStoreResources(r *http.Request) map[string]any {
 	}
 	resp, err := proxyClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
+		status := 0
 		if resp != nil {
+			status = resp.StatusCode
 			resp.Body.Close()
 		}
-		h.log.Debug("could not read the live Kobo resource table; using the built-in one")
+		// Named causes, because the two that happen look nothing alike from
+		// here: 401 is the device's own Kobo credentials being refused, and a
+		// 403 or a timeout is usually Cloudflare refusing the server's address.
+		h.log.Warn("could not read the live Kobo resource table",
+			"status", status, "err", err)
 		return nil
 	}
 	defer resp.Body.Close()
