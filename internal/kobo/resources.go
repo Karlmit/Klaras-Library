@@ -23,7 +23,9 @@ package kobo
 // OverDrive" exists only while that section does, so leaving them out does not
 // mean "we take no part in library borrowing" -- it deletes the menu entry from
 // the reader. They point at OverDrive's own hosts: we are not in that
-// conversation, we only have to stop erasing it.
+// conversation, we only have to stop erasing it. kobo_nativeborrow_enabled is
+// the separate feature flag for checkout: the URLs can restore browsing and
+// search while a false flag still leaves the device spinning after "Lend".
 func nativeKoboResources() map[string]any {
 	return map[string]any{
 		"account_page":                  "https://www.kobo.com/account/settings",
@@ -103,7 +105,7 @@ func nativeKoboResources() map[string]any {
 		"kobo_dropbox_link_account_enabled":     "False",
 		"kobo_google_tax":                       "False",
 		"kobo_googledrive_link_account_enabled": "False",
-		"kobo_nativeborrow_enabled":             "False",
+		"kobo_nativeborrow_enabled":             "True",
 		"kobo_onedrive_link_account_enabled":    "False",
 		"kobo_onestorelibrary_enabled":          "False",
 		"kobo_privacyCentre_url":                "https://www.kobo.com/privacy",

@@ -355,8 +355,10 @@ A table without `overdrive_*` keys therefore deletes the menu entry rather than
 leaving it alone, which is how a reader that borrowed from a public library
 yesterday can have no OverDrive today.
 
-Those keys are now always sent, pointing at OverDrive's own hosts — the entry
-comes back on the device's next sync, with nothing to change on the reader.
+Those keys are now always sent, pointing at OverDrive's own hosts, and
+`kobo_nativeborrow_enabled` is set to `True`. The entry comes back on the
+device's next sync and the checkout flow remains enabled, with nothing to
+change on the reader.
 Borrowed books are separate: they arrive through Kobo's library sync, so they
 still need `KLARAS_KOBO_PROXY_STORE=true`.
 

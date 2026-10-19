@@ -702,6 +702,7 @@ func TestInitializationKeepsOverDrive(t *testing.T) {
 	}
 
 	for k, want := range map[string]string{
+		"kobo_nativeborrow_enabled":     "True",
 		"overdrive_account":             "https://auth.overdrive.com/account",
 		"overdrive_library":             "https://{libraryKey}.auth.overdrive.com/library",
 		"overdrive_library_finder_host": "https://libraryfinder.api.overdrive.com",
@@ -709,8 +710,8 @@ func TestInitializationKeepsOverDrive(t *testing.T) {
 	} {
 		got, _ := body.Resources[k].(string)
 		if got != want {
-			t.Errorf("resource %q = %q, want %q; the device drops the OverDrive "+
-				"menu when this is missing", k, got, want)
+			t.Errorf("resource %q = %q, want %q; the device cannot complete the "+
+				"OverDrive flow when this is missing or disabled", k, got, want)
 		}
 	}
 }
