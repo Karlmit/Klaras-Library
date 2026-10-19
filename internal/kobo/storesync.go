@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -49,15 +48,7 @@ func (h *Handler) syncWithStore(ctx context.Context, r *http.Request, tok *SyncT
 	if err != nil {
 		return nil
 	}
-	for k, vs := range r.Header {
-		if isHopByHop(k) || strings.EqualFold(k, "Host") ||
-			strings.EqualFold(k, SyncTokenHeader) {
-			continue
-		}
-		for _, v := range vs {
-			req.Header.Add(k, v)
-		}
-	}
+	copyDecodedUpstreamHeaders(req.Header, r.Header, SyncTokenHeader)
 	// The store must see its own position, not ours.
 	if tok.RawKoboStoreToken != "" {
 		req.Header.Set(SyncTokenHeader, tok.RawKoboStoreToken)

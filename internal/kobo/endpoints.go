@@ -396,14 +396,7 @@ func (h *Handler) fetchStoreResources(r *http.Request) map[string]any {
 	if err != nil {
 		return nil
 	}
-	for k, vs := range r.Header {
-		if isHopByHop(k) || strings.EqualFold(k, "Host") {
-			continue
-		}
-		for _, v := range vs {
-			req.Header.Add(k, v)
-		}
-	}
+	copyDecodedUpstreamHeaders(req.Header, r.Header)
 	resp, err := proxyClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		status := 0
@@ -424,6 +417,7 @@ func (h *Handler) fetchStoreResources(r *http.Request) map[string]any {
 		Resources map[string]any `json:"Resources"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&body); err != nil {
+		h.log.Warn("could not parse the live Kobo resource table", "err", err)
 		return nil
 	}
 	return body.Resources

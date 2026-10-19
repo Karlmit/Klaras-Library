@@ -108,3 +108,30 @@ func isHopByHop(h string) bool {
 	}
 	return false
 }
+
+// copyDecodedUpstreamHeaders copies device headers for a request whose response
+// Klaras itself will decode. Accept-Encoding is intentionally omitted: when Go's
+// transport adds gzip negotiation it also transparently decompresses the body,
+// but when a caller supplies the header Go correctly leaves the compressed bytes
+// alone. Kobo sends Accept-Encoding, so forwarding it made JSON decoding start
+// on the gzip magic byte (0x1f) instead of '[' or '{'.
+func copyDecodedUpstreamHeaders(dst, src http.Header, skip ...string) {
+	for k, vs := range src {
+		if isHopByHop(k) || strings.EqualFold(k, "Host") ||
+			strings.EqualFold(k, "Accept-Encoding") || headerIn(k, skip) {
+			continue
+		}
+		for _, v := range vs {
+			dst.Add(k, v)
+		}
+	}
+}
+
+func headerIn(header string, names []string) bool {
+	for _, name := range names {
+		if strings.EqualFold(header, name) {
+			return true
+		}
+	}
+	return false
+}
