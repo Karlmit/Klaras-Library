@@ -34,6 +34,13 @@ func (h *Handler) handleMetadata(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Store and OverDrive entitlements share this endpoint with local books.
+	// They arrive through the merged Kobo sync but are not rows in our books
+	// table, so let the authenticated device fetch their DRM metadata from Kobo.
+	if h.proxyStore {
+		h.proxyToKoboStore(w, r)
+		return
+	}
 	http.Error(w, "not found", http.StatusNotFound)
 }
 
@@ -290,6 +297,21 @@ func (h *Handler) handleImage(w http.ResponseWriter, r *http.Request) {
 	var path string
 	if err := h.pool.QueryRow(r.Context(),
 		`SELECT path FROM books WHERE uuid=$1`, uuid).Scan(&path); err != nil {
+		// Initialization deliberately routes all cover requests through Klaras
+		// so local books work. Unknown IDs belong to Kobo Store/OverDrive; using
+		// a placeholder here hides their covers permanently.
+		if h.proxyStore {
+			quality := chi.URLParam(r, "quality")
+			target := koboImageHost + "/" + url.PathEscape(uuid) + "/" +
+				url.PathEscape(chi.URLParam(r, "width")) + "/" +
+				url.PathEscape(chi.URLParam(r, "height")) + "/"
+			if quality != "" {
+				target += url.PathEscape(quality) + "/"
+			}
+			target += url.PathEscape(chi.URLParam(r, "greyscale")) + "/image.jpg"
+			http.Redirect(w, r, target, http.StatusTemporaryRedirect)
+			return
+		}
 		h.servePlaceholder(w, width)
 		return
 	}

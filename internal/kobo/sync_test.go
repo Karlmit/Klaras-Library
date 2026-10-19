@@ -179,6 +179,66 @@ func countKinds(items []map[string]json.RawMessage) map[string]int {
 	return out
 }
 
+func noRedirectClient() *http.Client {
+	return &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+}
+
+func TestUnknownStoreMetadataIsSentBackToKobo(t *testing.T) {
+	f := newFixtureWithProxy(t, 1)
+	const id = "527c27dd-d6d2-4688-8d02-f831ae0994a1"
+
+	res, err := noRedirectClient().Get(f.srv.URL + "/kobo/" + f.token +
+		"/v1/library/" + id + "/metadata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want 307", res.StatusCode)
+	}
+	want := "https://storeapi.kobo.com/v1/library/" + id + "/metadata"
+	if got := res.Header.Get("Location"); got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+}
+
+func TestUnknownStoreCoverIsSentBackToKoboCDN(t *testing.T) {
+	f := newFixtureWithProxy(t, 1)
+	const id = "5bbc3426-a0bc-401f-aaed-6c4d97cdda86"
+
+	res, err := noRedirectClient().Get(f.srv.URL + "/kobo/" + f.token + "/" +
+		id + "/1072/1448/80/False/image.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want 307", res.StatusCode)
+	}
+	want := "https://cdn.kobo.com/book-images/" + id + "/1072/1448/80/False/image.jpg"
+	if got := res.Header.Get("Location"); got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+}
+
+func TestUnknownStoreCoverWithoutQualityIsSentBackToKoboCDN(t *testing.T) {
+	f := newFixtureWithProxy(t, 1)
+	const id = "5bbc3426-a0bc-401f-aaed-6c4d97cdda86"
+
+	res, err := noRedirectClient().Get(f.srv.URL + "/kobo/" + f.token + "/" +
+		id + "/355/530/false/image.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	want := "https://cdn.kobo.com/book-images/" + id + "/355/530/false/image.jpg"
+	if got := res.Header.Get("Location"); res.StatusCode != http.StatusTemporaryRedirect || got != want {
+		t.Errorf("status = %d, Location = %q; want 307 and %q", res.StatusCode, got, want)
+	}
+}
+
 // TestSyncConverges is the property that matters most.
 //
 // A device that never reaches "nothing new" re-downloads its whole shelf on

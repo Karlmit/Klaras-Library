@@ -11,6 +11,11 @@ import (
 // koboStoreHost is the real Kobo API.
 const koboStoreHost = "https://storeapi.kobo.com"
 
+// koboImageHost serves covers for Kobo Store and OverDrive entitlements. The
+// initialization response points every image request at Klaras so local books
+// can have local covers; handleImage sends IDs Klaras does not own back here.
+const koboImageHost = "https://cdn.kobo.com/book-images"
+
 // proxyClient has a short timeout: a slow Kobo store must never hold up a
 // device request long enough to trip its own ~30s limit.
 var proxyClient = &http.Client{Timeout: 10 * time.Second}
