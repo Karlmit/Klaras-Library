@@ -204,6 +204,25 @@ func TestUnknownStoreMetadataIsSentBackToKobo(t *testing.T) {
 	}
 }
 
+func TestUnknownStoreReadingStateIsSentBackToKobo(t *testing.T) {
+	f := newFixtureWithProxy(t, 1)
+	const id = "527c27dd-d6d2-4688-8d02-f831ae0994a1"
+
+	res, err := noRedirectClient().Get(f.srv.URL + "/kobo/" + f.token +
+		"/v1/library/" + id + "/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want 307", res.StatusCode)
+	}
+	want := "https://storeapi.kobo.com/v1/library/" + id + "/state"
+	if got := res.Header.Get("Location"); got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+}
+
 func TestUnknownStoreCoverIsSentBackToKoboCDN(t *testing.T) {
 	f := newFixtureWithProxy(t, 1)
 	const id = "5bbc3426-a0bc-401f-aaed-6c4d97cdda86"

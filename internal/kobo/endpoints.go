@@ -51,6 +51,12 @@ func (h *Handler) handleGetState(w http.ResponseWriter, r *http.Request) {
 
 	bookID, _, err := h.bookByUUID(r.Context(), uuid)
 	if err != nil {
+		// Kobo Store and OverDrive books are included in the merged sync but do
+		// not exist in our books table. Their reading state belongs to Kobo.
+		if h.proxyStore {
+			h.proxyToKoboStore(w, r)
+			return
+		}
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -106,6 +112,10 @@ func (h *Handler) handlePutState(w http.ResponseWriter, r *http.Request) {
 
 	bookID, _, err := h.bookByUUID(r.Context(), uuid)
 	if err != nil {
+		if h.proxyStore {
+			h.proxyToKoboStore(w, r)
+			return
+		}
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -192,6 +202,10 @@ func (h *Handler) handleArchive(w http.ResponseWriter, r *http.Request) {
 
 	bookID, _, err := h.bookByUUID(r.Context(), uuid)
 	if err != nil {
+		if h.proxyStore {
+			h.proxyToKoboStore(w, r)
+			return
+		}
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
