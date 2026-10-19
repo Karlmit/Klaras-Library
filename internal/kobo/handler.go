@@ -2,6 +2,7 @@ package kobo
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -165,16 +166,11 @@ func (h *Handler) logRequests(next http.Handler) http.Handler {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 
-		// The token is a bearer credential, so it is reduced to a short prefix:
-		// enough to tell devices apart in a log, useless to anyone who reads it.
 		tok := chi.URLParam(r, "token")
-		short := tok
-		if len(short) > 8 {
-			short = short[:8] + "..."
-		}
+		device := deviceLogID(tok)
 		path := r.URL.Path
 		if tok != "" {
-			path = strings.Replace(path, tok, short, 1)
+			path = strings.Replace(path, tok, "[redacted]", 1)
 		}
 
 		next.ServeHTTP(rec, r)
@@ -185,7 +181,7 @@ func (h *Handler) logRequests(next http.Handler) http.Handler {
 			"status", rec.status,
 			"bytes", rec.written,
 			"dur_ms", float64(time.Since(start).Microseconds()) / 1000,
-			"device", short,
+			"device", device,
 		}
 		if rec.status >= 400 {
 			h.log.Warn("kobo request failed", attrs...)
@@ -244,7 +240,9 @@ func (h *Handler) authenticate(next http.Handler) http.Handler {
 		u, err := h.auth.UserForKoboToken(r.Context(), token)
 		if err != nil {
 			h.limiter.Fail("kobo:" + ip)
-			h.log.Warn("kobo auth failed", "ip", ip, "path", r.URL.Path)
+			h.log.Warn("kobo auth failed", "ip", ip,
+				"path", strings.Replace(r.URL.Path, token, "[redacted]", 1),
+				"device", deviceLogID(token))
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -253,6 +251,16 @@ func (h *Handler) authenticate(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, tokenKey, token)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// deviceLogID distinguishes devices without retaining any part of the bearer
+// token. It is deliberately one-way and useful only for correlating log lines.
+func deviceLogID(token string) string {
+	if token == "" {
+		return "unknown"
+	}
+	sum := sha256.Sum256([]byte(token))
+	return fmt.Sprintf("%x", sum[:4])
 }
 
 func userOf(r *http.Request) *auth.User {

@@ -65,19 +65,19 @@ func (h *Handler) syncWithStore(ctx context.Context, r *http.Request, tok *SyncT
 
 	res, err := proxyClient.Do(req)
 	if err != nil {
-		h.log.Debug("kobo store sync unavailable; serving the library only", "err", err)
+		h.log.Warn("kobo store sync unavailable; serving the library only", "err", err)
 		return nil
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		h.log.Debug("kobo store sync returned an error", "status", res.StatusCode)
+		h.log.Warn("kobo store sync returned an error", "status", res.StatusCode)
 		return nil
 	}
 
 	var items []json.RawMessage
 	if err := json.NewDecoder(io.LimitReader(res.Body, 16<<20)).Decode(&items); err != nil {
-		h.log.Debug("could not parse the kobo store sync response", "err", err)
+		h.log.Warn("could not parse the kobo store sync response", "err", err)
 		return nil
 	}
 

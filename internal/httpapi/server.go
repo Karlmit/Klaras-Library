@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/alexedwards/scs/pgxstore"
@@ -42,6 +43,7 @@ type Server struct {
 	queue     *jobs.Queue
 	sessions  *scs.SessionManager
 	log       *slog.Logger
+	logs      logSnapshotter
 	version   string
 	router    chi.Router
 	started   time.Time
@@ -60,6 +62,7 @@ type Deps struct {
 	Providers *provider.Set
 	Queue     *jobs.Queue
 	Log       *slog.Logger
+	Logs      logSnapshotter
 	Version   string
 }
 
@@ -87,7 +90,7 @@ func New(d Deps) *Server {
 		cfg: d.Config, db: d.DB, lib: d.Library, auth: d.Auth,
 		covers: d.Covers, kepub: d.Kepub, files: d.Files, ingest: d.Ingest,
 		providers: d.Providers, queue: d.Queue, sessions: sm,
-		log: d.Log, version: d.Version, started: time.Now(),
+		log: d.Log, logs: d.Logs, version: d.Version, started: time.Now(),
 	}
 	s.routes()
 	return s
@@ -206,6 +209,7 @@ func (s *Server) routes() {
 				r.Post("/books/adult", s.handleSetAdultMany)
 				r.Get("/descriptions", s.handleDescriptionStatus)
 				r.Post("/descriptions/run", s.handleDescriptionRun)
+				r.Get("/diagnostics/logs", s.handleDownloadLogs)
 			})
 		})
 	})
@@ -288,7 +292,7 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		defer func() {
 			attrs := []any{
 				"method", r.Method,
-				"path", r.URL.Path,
+				"path", safeRequestPath(r.URL.Path),
 				"status", ww.Status(),
 				"bytes", ww.BytesWritten(),
 				"dur_ms", float64(time.Since(start).Microseconds()) / 1000,
@@ -305,4 +309,20 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(ww, r)
 	})
+}
+
+// safeRequestPath removes the bearer credential embedded in Kobo URLs. The
+// Kobo-specific logger already does this; the outer HTTP logger must too.
+func safeRequestPath(path string) string {
+	const marker = "/kobo/"
+	i := strings.Index(path, marker)
+	if i < 0 {
+		return path
+	}
+	start := i + len(marker)
+	end := strings.IndexByte(path[start:], '/')
+	if end < 0 {
+		return path[:start] + "[redacted]"
+	}
+	return path[:start] + "[redacted]" + path[start+end:]
 }

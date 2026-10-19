@@ -40,7 +40,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error, msg str
 		// The client went away; nothing useful to send.
 		return
 	}
-	s.log.Error(msg, "err", err, "path", r.URL.Path)
+	s.log.Error(msg, "err", err, "path", safeRequestPath(r.URL.Path))
 	writeErr(w, http.StatusInternalServerError, "internal error")
 }
 

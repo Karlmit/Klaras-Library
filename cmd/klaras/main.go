@@ -32,6 +32,7 @@ import (
 	"github.com/Karlmit/Klaras-Library/internal/kepub"
 	"github.com/Karlmit/Klaras-Library/internal/kobo"
 	"github.com/Karlmit/Klaras-Library/internal/library"
+	"github.com/Karlmit/Klaras-Library/internal/logcapture"
 	"github.com/Karlmit/Klaras-Library/internal/provider"
 	"github.com/Karlmit/Klaras-Library/internal/store"
 )
@@ -138,7 +139,10 @@ func cmdServe() error {
 	if err != nil {
 		return err
 	}
-	log := newLogger(cfg)
+	// Keep the newest four MiB available to administrators from Settings while
+	// preserving stdout/stderr logging for Docker and Unraid.
+	logBuffer := logcapture.New(4 << 20)
+	log := newLoggerTo(cfg, io.MultiWriter(os.Stderr, logBuffer))
 	log.Info("starting klaras", "version", version, "library_root", cfg.LibraryRoot)
 
 	// Check the directories before anything depends on them. A cache the
@@ -202,7 +206,7 @@ func cmdServe() error {
 		Config: cfg, DB: db, Library: lib, Auth: authSvc,
 		Covers: coverSvc, Kepub: kepubSvc, Files: files, Ingest: ingestSvc,
 		Providers: provider.NewSet("swe"),
-		Queue:     queue, Log: log, Version: version,
+		Queue:     queue, Log: log, Logs: logBuffer, Version: version,
 	})
 
 	srv := &http.Server{
@@ -1137,6 +1141,10 @@ func cmdDevSeed() error {
 }
 
 func newLogger(cfg *config.Config) *slog.Logger {
+	return newLoggerTo(cfg, os.Stderr)
+}
+
+func newLoggerTo(cfg *config.Config, out io.Writer) *slog.Logger {
 	var level slog.Level
 	switch strings.ToLower(cfg.LogLevel) {
 	case "debug":
@@ -1150,9 +1158,9 @@ func newLogger(cfg *config.Config) *slog.Logger {
 	}
 	opts := &slog.HandlerOptions{Level: level}
 	if strings.EqualFold(cfg.LogFormat, "json") {
-		return slog.New(slog.NewJSONHandler(os.Stderr, opts))
+		return slog.New(slog.NewJSONHandler(out, opts))
 	}
-	return slog.New(slog.NewTextHandler(os.Stderr, opts))
+	return slog.New(slog.NewTextHandler(out, opts))
 }
 
 // cmdSeriesFromTitle records a series that only ever existed in book titles.

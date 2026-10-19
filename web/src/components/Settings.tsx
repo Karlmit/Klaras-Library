@@ -6,7 +6,7 @@ import { SettingsUsers } from './SettingsUsers'
 import { SettingsDescriptions } from './SettingsDescriptions'
 import { Shelves } from './Shelves'
 
-type Tab = 'kobo' | 'shelves' | 'users' | 'descriptions' | 'account'
+type Tab = 'kobo' | 'shelves' | 'users' | 'descriptions' | 'diagnostics' | 'account'
 
 export function Settings({
   user, onClose, onBrowseShelf,
@@ -23,6 +23,7 @@ export function Settings({
     { id: 'shelves', label: 'Shelves', show: true },
     { id: 'users', label: 'Users', show: isAdmin },
     { id: 'descriptions', label: 'Descriptions', show: isAdmin },
+    { id: 'diagnostics', label: 'Diagnostics', show: isAdmin },
     { id: 'account', label: 'Your account', show: true },
   ]
 
@@ -61,8 +62,28 @@ export function Settings({
         )}
         {tab === 'users' && isAdmin && <SettingsUsers me={user} />}
         {tab === 'descriptions' && isAdmin && <SettingsDescriptions />}
+        {tab === 'diagnostics' && isAdmin && <DiagnosticsTab />}
         {tab === 'account' && <AccountTab user={user} />}
       </div>
+    </div>
+  )
+}
+
+function DiagnosticsTab() {
+  return (
+    <div style={{ maxWidth: 620 }}>
+      <h3>Application logs</h3>
+      <p>
+        Download Klaras Library’s recent logs for troubleshooting. The file contains up to
+        4 MB from the current server run; restarting the container starts a new log.
+      </p>
+      <p className="hint">
+        Kobo device tokens are removed from request paths. The file may still contain book
+        titles, usernames, network addresses, and upstream service errors, so share it privately.
+      </p>
+      <a className="btn" href="/api/diagnostics/logs" download>
+        Download logs
+      </a>
     </div>
   )
 }
