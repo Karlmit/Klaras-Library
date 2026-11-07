@@ -361,9 +361,11 @@ func (s *Server) handleKoboToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListKoboTokens(w http.ResponseWriter, r *http.Request) {
+	// Device URLs contain bearer credentials; keep them out of browser/proxy caches.
+	w.Header().Set("Cache-Control", "no-store")
 	u := s.currentUser(r)
 	rows, err := s.db.Pool.Query(r.Context(), `
-		SELECT id, label, created_at, last_used_at FROM kobo_auth_tokens
+		SELECT id, label, token, created_at, last_used_at FROM kobo_auth_tokens
 		WHERE user_id=$1 ORDER BY created_at`, u.ID)
 	if err != nil {
 		s.fail(w, r, err, "list kobo tokens")
@@ -372,22 +374,29 @@ func (s *Server) handleListKoboTokens(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type tok struct {
-		ID         int64   `json:"id"`
-		Label      string  `json:"label"`
-		CreatedAt  string  `json:"created_at"`
-		LastUsedAt *string `json:"last_used_at"`
+		ID          int64   `json:"id"`
+		Label       string  `json:"label"`
+		CreatedAt   string  `json:"created_at"`
+		LastUsedAt  *string `json:"last_used_at"`
+		APIStoreURL string  `json:"api_store_url"`
+	}
+	base := strings.TrimRight(s.cfg.ExternalURL, "/")
+	if base == "" {
+		base = "https://YOUR-PUBLIC-URL"
 	}
 	out := []tok{}
 	for rows.Next() {
 		var (
 			t       tok
+			token   string
 			created time.Time
 			used    *time.Time
 		)
-		if err := rows.Scan(&t.ID, &t.Label, &created, &used); err != nil {
+		if err := rows.Scan(&t.ID, &t.Label, &token, &created, &used); err != nil {
 			s.fail(w, r, err, "scan token")
 			return
 		}
+		t.APIStoreURL = base + "/kobo/" + token
 		t.CreatedAt = created.UTC().Format(time.RFC3339)
 		if used != nil {
 			formatted := used.UTC().Format(time.RFC3339)

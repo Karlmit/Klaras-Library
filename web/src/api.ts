@@ -426,7 +426,7 @@ export const descriptionsApi = {
 
 export const koboApi = {
   tokens: () =>
-    req<{ tokens: { id: number; label: string; created_at: string; last_used_at: string | null }[] }>(
+    req<{ tokens: { id: number; label: string; api_store_url: string; created_at: string; last_used_at: string | null }[] }>(
       '/api/kobo/tokens',
     ),
   create: (label: string) =>
