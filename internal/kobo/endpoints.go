@@ -401,9 +401,12 @@ func (h *Handler) handleInitialization(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Then point only the image URLs at us, so covers come from this library.
+	// Route library sync and covers back through this library. The device uses
+	// these absolute resource URLs after initialization, even with api_endpoint
+	// set to us; leaving library_sync native bypasses our sync handler entirely.
 	if base := strings.TrimRight(h.externalURL, "/"); base != "" {
 		prefix := base + "/kobo/" + tokenOf(r)
+		res["library_sync"] = prefix + "/v1/library/sync"
 		res["image_host"] = base
 		res["image_url_template"] = prefix + "/{ImageId}/{Width}/{Height}/false/image.jpg"
 		res["image_url_quality_template"] = prefix +

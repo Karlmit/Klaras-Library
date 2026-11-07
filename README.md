@@ -281,7 +281,7 @@ return, because it is what makes your existing calibre-web unusable.
 3. **Browse and search.** Check the books, covers and categories look right.
 4. **Point one Kobo at it** and confirm a shelf syncs and a book opens.
 5. **Live with it for a while.** Until this point, rolling back is just
-   pointing the device's `api_store` back at calibre-web.
+   pointing the device's `api_endpoint` back at calibre-web.
 6. **Only then `reorganize`** — and review the `--dry-run` plan first.
 
 Do not run `reorganize` before step 1. It never touches `metadata.db`, so
@@ -307,7 +307,7 @@ point somewhere new, and there are two ways to do that:
 - **Repoint your existing hostname** at the new container. Nothing changes on
   the device at all, and rolling back is just pointing it at calibre-web again.
   This is the smoother option.
-- **Use a new hostname**, and edit `api_store` in `.kobo/Kobo/Kobo eReader.conf`
+- **Use a new hostname**, and edit `api_endpoint` in `.kobo/Kobo/Kobo eReader.conf`
   on the device. Useful if you want both servers reachable at once.
 
 The device also keeps its sync position, because the token format is
@@ -315,7 +315,7 @@ wire-compatible with calibre-web's, field for field. It will resume rather than
 re-download the shelf.
 
 For a device that has never synced, create a token in the web UI and you are
-given the exact `api_store` URL to paste.
+given the exact `api_endpoint` URL to paste.
 
 ### Kobo store proxying
 

@@ -355,7 +355,7 @@ func (s *Server) handleKoboToken(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"token": token,
-		// This exact string goes into the device's api_store setting.
+		// This exact string goes into the device's api_endpoint setting.
 		"api_store_url": base + "/kobo/" + token,
 	})
 }

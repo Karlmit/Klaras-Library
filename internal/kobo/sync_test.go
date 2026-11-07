@@ -742,7 +742,12 @@ func TestInitializationReturnsTheFullResourceTable(t *testing.T) {
 			t.Errorf("resource %q is empty", k)
 		}
 	}
-	// ...and the three that must point back at us.
+	// Sync must retain the device token and return to our handler, not Kobo.
+	wantSync := "https://library.example.com/kobo/" + f.token + "/v1/library/sync"
+	if got := body.Resources["library_sync"]; got != wantSync {
+		t.Errorf("library_sync = %v, want %s", got, wantSync)
+	}
+	// ...and the three cover resources must point back at us.
 	for _, k := range []string{"image_host", "image_url_template", "image_url_quality_template"} {
 		s, _ := body.Resources[k].(string)
 		if !strings.Contains(s, "library.example.com") {

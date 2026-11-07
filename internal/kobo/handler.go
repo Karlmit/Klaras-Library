@@ -84,7 +84,7 @@ const (
 // Routes mounts the Kobo API under /kobo/{token}.
 //
 // The token lives in the URL path rather than a header because that is the only
-// thing a Kobo can be configured with: the device is given an api_store URL and
+// thing a Kobo can be configured with: the device is given an api_endpoint URL and
 // appends its own paths to it.
 func (h *Handler) Routes(r chi.Router) {
 	r.Route("/kobo/{token}", func(r chi.Router) {

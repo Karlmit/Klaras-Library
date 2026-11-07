@@ -52,15 +52,19 @@ export function SettingsKobo() {
           <li>Connect the Kobo to your computer by USB and choose Connect on the Kobo.</li>
           <li>Show hidden files and back up <code>.kobo/Kobo/Kobo eReader.conf</code> from the Kobo drive.</li>
           <li>Open that file in a plain text editor. In the <code>[OneStoreServices]</code> section,
-            replace the <code>api_store=</code> line with the complete line shown below for your device.
+            replace the <code>api_endpoint=</code> line with the complete line shown below for your device.
             If it is missing, add it directly under <code>[OneStoreServices]</code>. Keep only one
-            <code> api_store</code> entry and leave the other settings in place.</li>
+            <code> api_endpoint</code> entry and leave the other settings in place.
+            Remove any <code>api_store=</code> line added using the earlier instructions;
+            Kobo uses <code>api_endpoint</code> for this setting.</li>
           <li>Save the file, safely eject the Kobo, disconnect USB, then sync over Wi-Fi.</li>
         </ol>
         <p className="hint">
           Check that your shelves have <strong>Sync to Kobo</strong> enabled.
           If books are still missing after restoring the URL, use <strong>Force a full resync</strong>
           {' '}below, then sync the Kobo again. This resets delivery records for all devices on your account.
+          If the device still does not connect, check its Last sync time below after syncing.
+          An unchanged time means the request has not authenticated with this library.
           Keep device URLs private: they grant access to your synced library.
         </p>
       </div>
@@ -88,18 +92,18 @@ export function SettingsKobo() {
 
       {fresh && (
         <div className="callout">
-          <strong>Set this as the device's <code>api_store</code></strong>
+          <strong>Set this as the device's <code>api_endpoint</code></strong>
           <p className="hint" style={{ margin: '6px 0' }}>
             On the Kobo, edit <code>.kobo/Kobo/Kobo eReader.conf</code> and set
-            <code> api_store</code> to exactly this, then sync.
+            <code> api_endpoint</code> to the URL in this line, then sync.
           </p>
           <div className="copyrow">
-            <code>{fresh.api_store_url}</code>
+            <code style={{ overflowWrap: 'anywhere', whiteSpace: 'normal' }}>api_endpoint={fresh.api_store_url}</code>
             <button
               className="btn btn--sm"
               onClick={async () => {
                 try {
-                  await navigator.clipboard.writeText(fresh.api_store_url)
+                  await navigator.clipboard.writeText(`api_endpoint=${fresh.api_store_url}`)
                   setCopied(fresh.api_store_url)
                   setTimeout(() => setCopied(null), 2000)
                 } catch {
@@ -108,7 +112,7 @@ export function SettingsKobo() {
                 }
               }}
             >
-              {copied === fresh.api_store_url ? 'Copied' : 'Copy'}
+              {copied === fresh.api_store_url ? 'Copied' : 'Copy line'}
             </button>
           </div>
           {fresh.api_store_url.includes('YOUR-PUBLIC-URL') && (
@@ -138,10 +142,10 @@ export function SettingsKobo() {
                 <td>
                   <strong>{t.label || 'Kobo'}</strong>
                   <div className="copyrow" style={{ marginTop: 6 }}>
-                    <code style={{ overflowWrap: 'anywhere', whiteSpace: 'normal' }}>api_store={t.api_store_url}</code>
+                    <code style={{ overflowWrap: 'anywhere', whiteSpace: 'normal' }}>api_endpoint={t.api_store_url}</code>
                     <button className="btn btn--sm" onClick={async () => {
                       try {
-                        await navigator.clipboard.writeText(`api_store=${t.api_store_url}`)
+                        await navigator.clipboard.writeText(`api_endpoint=${t.api_store_url}`)
                         setCopied(t.api_store_url)
                         setTimeout(() => setCopied(null), 2000)
                       } catch {
